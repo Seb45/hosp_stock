@@ -120,11 +120,8 @@ if st.session_state.rol == "Roperia":
     if menu == "Registrar Movimiento":
         st.header("📝 Nueva Carga")
         
-        # Necesitamos la IP local de tu PC para armar el link del celular
-        # ip_local = st.text_input("IP de tu PC (ej: 192.168.1.1) para el QR:", value="localhost")
-        # Así quedaría la generación del link para el QR en la nube
-        url_app_nube = "https://stockinsumos.streamlit.app/" 
-        url_qr = f"{url_app_nube}/?confirmar_id={nuevo_id}"
+        # 1. Solo definimos la URL base aquí afuera
+        url_app_nube = "https://stockinsumos.streamlit.app" 
         
         with st.form("form_carga", clear_on_submit=True):
             tipo = st.selectbox("Operación", ["Retiro", "Devolución"])
@@ -135,7 +132,7 @@ if st.session_state.rol == "Roperia":
             turno = st.selectbox("Turno", ["Mañana", "Tarde", "Noche"])
             
             if st.form_submit_button("Generar Caso"):
-                # Crear ID único
+                # 2. Creamos el ID único SÓLO cuando se presiona el botón
                 nuevo_id = str(uuid.uuid4())[:8] 
                 
                 nuevo_registro = pd.DataFrame([{
@@ -148,8 +145,9 @@ if st.session_state.rol == "Roperia":
                 
                 st.success("Caso generado. Esperando firma...")
                 
-                # Generar y mostrar el QR
-                url_qr = f"http://{url_app_nube}/?confirmar_id={nuevo_id}"
+                # 3. Generamos el QR usando la variable nuevo_id que acabamos de crear
+                # (Asegúrate de no poner 'http://' aquí porque tu url_app_nube ya lo tiene)
+                url_qr = f"{url_app_nube}/?confirmar_id={nuevo_id}"
                 img_qr = generar_qr(url_qr)
                 st.image(img_qr, caption="Pide al receptor que escanee este QR con su celular", width=300)
 
