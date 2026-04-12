@@ -121,7 +121,10 @@ if st.session_state.rol == "Roperia":
         st.header("📝 Nueva Carga")
         
         # Necesitamos la IP local de tu PC para armar el link del celular
-        ip_local = st.text_input("IP de tu PC (ej: 192.168.1.1) para el QR:", value="localhost")
+        # ip_local = st.text_input("IP de tu PC (ej: 192.168.1.1) para el QR:", value="localhost")
+        # Así quedaría la generación del link para el QR en la nube
+        url_app_nube = "https://stockinsumos.streamlit.app/" 
+        url_qr = f"{url_app_nube}/?confirmar_id={nuevo_id}"
         
         with st.form("form_carga", clear_on_submit=True):
             tipo = st.selectbox("Operación", ["Retiro", "Devolución"])
@@ -146,7 +149,7 @@ if st.session_state.rol == "Roperia":
                 st.success("Caso generado. Esperando firma...")
                 
                 # Generar y mostrar el QR
-                url_qr = f"http://{ip_local}:8501/?confirmar_id={nuevo_id}"
+                url_qr = f"http://{url_app_nube}/?confirmar_id={nuevo_id}"
                 img_qr = generar_qr(url_qr)
                 st.image(img_qr, caption="Pide al receptor que escanee este QR con su celular", width=300)
 
