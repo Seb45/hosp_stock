@@ -1,43 +1,24 @@
 import streamlit as st
+from streamlit_gsheets import GSheetsConnection
 import pandas as pd
-import os
 import uuid
 import qrcode
 from io import BytesIO
 from datetime import datetime
 
-st.set_page_config(page_title="Control Hotelería", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="Control Hotelería", layout="wide")
 
-# --- 1. CONFIGURACIÓN DE ARCHIVOS ---
-FILE_MOV = "movimientos.csv"
-FILE_USU = "usuarios.csv"
-FILE_INS = "insumos.csv"
-FILE_SEC = "sectores.csv"
+# --- 1. CONEXIÓN A GOOGLE SHEETS ---
+# En la nube, Streamlit buscará la URL en los "Secrets"
+conn = st.connection("gsheets", type=GSheetsConnection)
 
-def inicializar_archivos():
-    if not os.path.exists(FILE_USU):
-        pd.DataFrame({
-            "Nombre": ["Admin Roperia", "Juan Piso 1", "Maria UTI"],
-            "Rol": ["Roperia", "Piso", "Piso"],
-            "PIN": ["1234", "1111", "2222"]
-        }).to_csv(FILE_USU, index=False)
-        
-    if not os.path.exists(FILE_MOV):
-        pd.DataFrame(columns=[
-            "ID_Mov", "Fecha_Hora", "Tipo", "Insumo", "Cantidad", 
-            "Responsable", "Sector", "Turno", "Estado", "Usuario_Carga"
-        ]).to_csv(FILE_MOV, index=False)
-        
-    if not os.path.exists(FILE_INS):
-        pd.DataFrame({"Nombre": ["Kit Cama Estándar (1 Sábana, 1 Funda)", "Sábana 1 Plaza", "Frazada", "Toalla Baño"]}).to_csv(FILE_INS, index=False)
-    if not os.path.exists(FILE_SEC):
-        pd.DataFrame({"Nombre": ["Guardia (Planta Baja)", "Piso 1", "UTI"]}).to_csv(FILE_SEC, index=False)
-
-inicializar_archivos()
-
-# --- 2. FUNCIONES ---
 def cargar_datos():
-    return pd.read_csv(FILE_MOV), pd.read_csv(FILE_USU), pd.read_csv(FILE_INS), pd.read_csv(FILE_SEC)
+    # ttl=0 para que siempre traiga datos frescos al recargar
+    df_mov = conn.read(worksheet="movimientos", ttl=0)
+    df_usu = conn.read(worksheet="usuarios", ttl=0)
+    df_ins = conn.read(worksheet="insumos", ttl=0)
+    df_sec = conn.read(worksheet="sectores", ttl=0)
+    return df_mov, df_usu, df_ins, df_sec
 
 def generar_qr(url):
     qr = qrcode.make(url)
@@ -45,47 +26,44 @@ def generar_qr(url):
     qr.save(buffer, format="PNG")
     return buffer.getvalue()
 
+# Carga inicial
 df_mov, df_usu, df_ins, df_sec = cargar_datos()
 
-# --- 3. LÓGICA DE CÓDIGO QR (VALIDACIÓN) ---
+# --- 2. LÓGICA DE VALIDACIÓN POR QR ---
 params = st.query_params
 if "confirmar_id" in params:
     id_a_confirmar = params["confirmar_id"]
     st.title("📱 Validación de Recepción")
     
-    movimientos = df_mov[df_mov['ID_Mov'] == id_a_confirmar]
+    # Filtrar el movimiento en el DataFrame de la nube
+    movimientos_pendientes = df_mov[df_mov['ID_Mov'].astype(str) == str(id_a_confirmar)]
     
-    if not movimientos.empty:
-        # Verificamos el estado del primer registro (todos comparten el mismo estado por ID)
-        if movimientos.iloc[0]["Estado"] == "Confirmado":
-            st.success("✅ Esta transacción ya fue confirmada previamente.")
+    if not movimientos_pendientes.empty:
+        if movimientos_pendientes.iloc[0]["Estado"] == "Confirmado":
+            st.success("✅ Esta transacción ya fue confirmada.")
         else:
-            tipo_op = movimientos.iloc[0]['Tipo']
-            responsable = movimientos.iloc[0]['Responsable']
-            
-            st.info(f"**Operación:** {tipo_op} | **Sector:** {movimientos.iloc[0]['Sector']}")
-            
-            # Mostrar tabla resumen de lo que se está llevando/devolviendo
-            st.write(f"**Detalle a confirmar por {responsable}:**")
-            st.dataframe(movimientos[['Cantidad', 'Insumo']], hide_index=True, use_container_width=True)
+            st.info(f"**Sector:** {movimientos_pendientes.iloc[0]['Sector']}")
+            st.write("**Detalle de insumos:**")
+            st.dataframe(movimientos_pendientes[['Cantidad', 'Insumo']], hide_index=True)
             
             pin_ingresado = st.text_input("Ingrese su PIN para firmar:", type="password")
             if st.button("Firmar y Confirmar", type="primary"):
+                responsable = movimientos_pendientes.iloc[0]['Responsable']
                 pin_real = str(df_usu[df_usu["Nombre"] == responsable]["PIN"].values[0])
+                
                 if pin_ingresado == pin_real:
-                    # Actualizar TODAS las filas que tengan ese ID
-                    df_mov.loc[df_mov['ID_Mov'] == id_a_confirmar, "Estado"] = "Confirmado"
-                    df_mov.to_csv(FILE_MOV, index=False)
-                    st.success("✅ ¡Firma digital exitosa! Ya puedes cerrar esta ventana.")
+                    # Actualizar en la nube: Bajamos todo, editamos y subimos
+                    df_mov.loc[df_mov['ID_Mov'].astype(str) == str(id_a_confirmar), "Estado"] = "Confirmado"
+                    conn.update(worksheet="movimientos", data=df_mov)
+                    st.success("✅ Firma registrada en la base de datos.")
                     st.balloons()
                 else:
-                    st.error("PIN incorrecto. Intente nuevamente.")
+                    st.error("PIN incorrecto.")
     else:
-        st.error("Código QR no válido o expirado.")
-        
+        st.error("Transacción no encontrada.")
     st.stop()
 
-# --- 4. SISTEMA DE LOGIN ---
+# --- 3. SISTEMA DE LOGIN ---
 if 'usuario' not in st.session_state:
     st.session_state.update({'usuario': None, 'rol': None})
 
@@ -103,8 +81,8 @@ if st.session_state.usuario is None:
                 st.error("Credenciales incorrectas")
     st.stop()
 
-# --- 5. APLICACIÓN PRINCIPAL ---
-st.sidebar.write(f"👤 **{st.session_state.usuario}** ({st.session_state.rol})")
+# --- 4. APLICACIÓN PRINCIPAL (ROLES) ---
+st.sidebar.write(f"👤 **{st.session_state.usuario}**")
 if st.sidebar.button("Cerrar Sesión"):
     st.session_state.clear()
     st.rerun()
@@ -113,107 +91,59 @@ if st.session_state.rol == "Roperia":
     menu = st.sidebar.selectbox("Menú", ["Nuevo Registro", "Auditoría"])
     
     if menu == "Nuevo Registro":
-        # --- ESTILOS CSS INYECTADOS PARA EL LOOK DE LA IMAGEN ---
-        st.markdown("""
-        <style>
-        /* Estilo para el botón principal verde */
-        button[kind="primary"] {
-            background-color: #28a745 !important;
-            color: white !important;
-            border-radius: 8px !important;
-            font-weight: bold !important;
-            padding: 15px !important;
-        }
-        </style>
-        """, unsafe_allow_html=True)
+        st.markdown("### 📋 Nuevo Registro Multi-Insumo")
+        url_app_nube = "https://stockinsumos.streamlit.app"
+        
+        if 'num_rows' not in st.session_state: st.session_state.num_rows = 1
+        if 'last_qr' not in st.session_state: st.session_state.last_qr = None
 
-        st.markdown("### 📋 Nuevo Registro")
+        tipo_op = st.radio("Operación", ["Retiro", "Devolución"], horizontal=True)
+        col_s, col_t = st.columns(2)
+        sector = col_s.selectbox("Sector", df_sec["Nombre"].tolist())
+        turno = col_t.selectbox("Turno", ["Mañana", "Tarde", "Noche"])
         
-        # URL de tu app en la nube
-        url_app_nube = "https://gestioninsumos.streamlit.app"
-        
-        # Variables de estado para los múltiples inputs
-        if 'num_insumos' not in st.session_state:
-            st.session_state.num_insumos = 1
-        if 'qr_generado' not in st.session_state:
-            st.session_state.qr_generado = None
-
-        # 1. Toggle de Retiro/Devolución
-        tipo_operacion = st.radio("Operación", ["⬆️ Retiro", "⬇️ Devolución"], horizontal=True, label_visibility="collapsed")
-        st.markdown("<hr style='margin: 10px 0;'>", unsafe_allow_html=True)
-
-        # 2. Sector y Turno
-        col1, col2 = st.columns(2)
-        sector = col1.selectbox("Sector / Piso", df_sec["Nombre"].tolist())
-        turno = col2.selectbox("Turno", ["Mañana", "Tarde", "Noche"])
-        
-        st.markdown("<br>", unsafe_allow_html=True)
-        st.write("**Insumos (Kit o Individual)**")
-        
-        # 3. Filas dinámicas de insumos
-        insumos_seleccionados = []
-        for i in range(st.session_state.num_insumos):
+        items_data = []
+        for i in range(st.session_state.num_rows):
             c1, c2 = st.columns([3, 1])
-            ins = c1.selectbox("Insumo", df_ins["Nombre"].tolist(), key=f"ins_{i}", label_visibility="collapsed")
-            cant = c2.number_input("Cant", min_value=1, step=1, key=f"cant_{i}", label_visibility="collapsed")
-            insumos_seleccionados.append({"Insumo": ins, "Cantidad": cant})
+            ins = c1.selectbox(f"Insumo {i+1}", df_ins["Nombre"].tolist(), key=f"i_{i}")
+            cant = c2.number_input(f"Cant {i+1}", min_value=1, key=f"c_{i}")
+            items_data.append({"Insumo": ins, "Cantidad": cant})
             
-        # Botón para agregar fila
-        if st.button("➕ Añadir otro insumo"):
-            st.session_state.num_insumos += 1
+        if st.button("➕ Añadir Insumo"):
+            st.session_state.num_rows += 1
             st.rerun()
 
-        st.markdown("<br>", unsafe_allow_html=True)
-        
-        # 4. Responsable
-        responsable = st.selectbox("Usuario Responsable (Quien retira)", df_usu[df_usu["Rol"] == "Piso"]["Nombre"].tolist())
-        st.markdown("<br>", unsafe_allow_html=True)
+        responsable = st.selectbox("Responsable (Piso)", df_usu[df_usu["Rol"] == "Piso"]["Nombre"].tolist())
 
-        # 5. Generación del caso
-        if st.button("🟩 Generar QR de Confirmación", type="primary", use_container_width=True):
-            nuevo_id = str(uuid.uuid4())[:8] 
-            fecha_act = datetime.now().strftime("%Y-%m-%d %H:%M")
-            tipo_final = "Retiro" if "Retiro" in tipo_operacion else "Devolución"
+        if st.button("🟩 Generar QR y Guardar", type="primary", use_container_width=True):
+            nuevo_id = str(uuid.uuid4())[:8]
+            fecha = datetime.now().strftime("%Y-%m-%d %H:%M")
             
-            nuevos_registros = []
-            for item in insumos_seleccionados:
-                nuevos_registros.append({
-                    "ID_Mov": nuevo_id, "Fecha_Hora": fecha_act,
-                    "Tipo": tipo_final, "Insumo": item["Insumo"], "Cantidad": item["Cantidad"],
+            # Crear los nuevos registros
+            nuevas_filas = []
+            for d in items_data:
+                nuevas_filas.append({
+                    "ID_Mov": nuevo_id, "Fecha_Hora": fecha, "Tipo": tipo_op,
+                    "Insumo": d["Insumo"], "Cantidad": d["Cantidad"],
                     "Responsable": responsable, "Sector": sector, "Turno": turno,
                     "Estado": "Pendiente", "Usuario_Carga": st.session_state.usuario
                 })
-                
-            # Guardado en bloque
-            df_nuevos = pd.DataFrame(nuevos_registros)
-            df_nuevos.to_csv(FILE_MOV, mode='a', header=df_mov.empty, index=False)
             
-            st.session_state.qr_generado = nuevo_id
-            st.success(f"Transacción {nuevo_id} generada con {len(insumos_seleccionados)} ítems.")
+            # Actualizar la nube: Concatenamos y subimos
+            df_final = pd.concat([df_mov, pd.DataFrame(nuevas_filas)], ignore_index=True)
+            conn.update(worksheet="movimientos", data=df_final)
             
-        # 6. Pantalla del QR (Aparece abajo tras presionar el botón)
-        if st.session_state.qr_generado:
-            st.markdown("---")
-            url_qr = f"{url_app_nube}/?confirmar_id={st.session_state.qr_generado}"
-            col_qr1, col_qr2 = st.columns([1, 2])
-            with col_qr1:
-                img_qr = generar_qr(url_qr)
-                st.image(img_qr, caption="Pide al receptor que escanee para firmar")
-            with col_qr2:
-                st.info("El caso queda en estado 'Pendiente' hasta que se lea este código.")
-                if st.button("Limpiar formulario y cargar otro"):
-                    st.session_state.num_insumos = 1
-                    st.session_state.qr_generado = None
-                    st.rerun()
+            st.session_state.last_qr = nuevo_id
+            st.success(f"Registrado. ID: {nuevo_id}")
+
+        if st.session_state.last_qr:
+            url_qr = f"{url_app_nube}/?confirmar_id={st.session_state.last_qr}"
+            st.image(generar_qr(url_qr), width=250)
+            if st.button("Nueva Carga"):
+                st.session_state.num_rows = 1
+                st.session_state.last_qr = None
+                st.rerun()
 
     elif menu == "Auditoría":
-        st.header("📊 Movimientos y Estados")
+        st.header("📊 Historial de la Nube")
         st.dataframe(df_mov, use_container_width=True)
-
-elif st.session_state.rol == "Piso":
-    st.header("🛎️ Mis Tareas Pendientes")
-    pendientes = df_mov[(df_mov["Responsable"] == st.session_state.usuario) & (df_mov["Estado"] == "Pendiente")]
-    if pendientes.empty:
-        st.success("Todo al día.")
-    else:
-        st.dataframe(pendientes[["ID_Mov", "Fecha_Hora", "Tipo", "Cantidad", "Insumo"]])
