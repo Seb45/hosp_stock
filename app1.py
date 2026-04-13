@@ -130,7 +130,7 @@ if st.session_state.rol == "Roperia":
         st.markdown("### 📋 Nuevo Registro")
         
         # URL de tu app en la nube
-        url_app_nube = "https://stockinsumos.streamlit.app"
+        url_app_nube = "https://gestioninsumos.streamlit.app"
         
         # Variables de estado para los múltiples inputs
         if 'num_insumos' not in st.session_state:
