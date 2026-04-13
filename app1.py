@@ -12,19 +12,19 @@ st.set_page_config(page_title="Control Hotelería", layout="wide")
 # En la nube, Streamlit buscará la URL en los "Secrets"
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-
 def cargar_datos():
-    # ttl = Time To Live (en segundos). 
-    # Guardamos las tablas de configuración en memoria por 10 minutos (600 segundos)
-    # porque los insumos, sectores y usuarios no cambian constantemente.
+    # Lecturas con memoria caché
+    df_mov = conn.read(worksheet="movimientos", ttl=5)
     df_usu = conn.read(worksheet="usuarios", ttl=600)
     df_ins = conn.read(worksheet="insumos", ttl=600)
     df_sec = conn.read(worksheet="sectores", ttl=600)
-    
-    # Los movimientos sí cambian más seguido, pero los cacheamos por 5 segundos
-    # para evitar saturar la API si el usuario hace muchos clics rápidos en los botones.
-    df_mov = conn.read(worksheet="movimientos", ttl=5)
-    
+
+    # NUEVO: Limpiador automático de espacios invisibles en las columnas
+    df_mov.columns = df_mov.columns.str.strip()
+    df_usu.columns = df_usu.columns.str.strip()
+    df_ins.columns = df_ins.columns.str.strip()
+    df_sec.columns = df_sec.columns.str.strip()
+
     return df_mov, df_usu, df_ins, df_sec
 
 
