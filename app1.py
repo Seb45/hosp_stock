@@ -49,20 +49,27 @@ if "confirmar_id" in params:
             pin_ingresado = st.text_input("Ingrese su PIN para firmar:", type="password")
             if st.button("Firmar y Confirmar", type="primary"):
                 responsable = movimientos_pendientes.iloc[0]['Responsable']
-                pin_real = str(df_usu[df_usu["Nombre"] == responsable]["PIN"].values[0])
+                usuario_data = df_usu[df_usu["Nombre"] == responsable]
                 
-                if pin_ingresado == pin_real:
-                    # Actualizar en la nube: Bajamos todo, editamos y subimos
-                    df_mov.loc[df_mov['ID_Mov'].astype(str) == str(id_a_confirmar), "Estado"] = "Confirmado"
-                    conn.update(worksheet="movimientos", data=df_mov)
-                    st.success("✅ Firma registrada en la base de datos.")
-                    st.balloons()
+                if usuario_data.empty:
+                    st.error(f"Error: El usuario '{responsable}' fue eliminado de la base de datos.")
                 else:
-                    st.error("PIN incorrecto.")
+                    # Forzamos que el PIN real sea texto limpio sin decimales ni espacios
+                    pin_real = str(usuario_data["PIN"].values[0]).replace('.0', '').strip()
+                    
+                    if pin_ingresado.strip() == pin_real:
+                        # Actualizar en la nube
+                        df_mov.loc[df_mov['ID_Mov'].astype(str) == str(id_a_confirmar), "Estado"] = "Confirmado"
+                        conn.update(worksheet="movimientos", data=df_mov)
+                        st.success("✅ Firma registrada en la base de datos.")
+                        st.balloons()
+                    else:
+                        st.error("PIN incorrecto.")
     else:
         st.error("Transacción no encontrada.")
     st.stop()
 
+# --- 3. SISTEMA DE LOGIN ---
 # --- 3. SISTEMA DE LOGIN ---
 if 'usuario' not in st.session_state:
     st.session_state.update({'usuario': None, 'rol': None})
@@ -73,14 +80,16 @@ if st.session_state.usuario is None:
         user = st.selectbox("Usuario", df_usu["Nombre"].tolist())
         pin = st.text_input("PIN", type="password")
         if st.form_submit_button("Ingresar"):
-            data = df_usu[(df_usu["Nombre"] == user) & (df_usu["PIN"].astype(str) == pin)]
+            # Creamos una columna temporal con los PINs totalmente limpios (sin .0 ni espacios)
+            df_usu["PIN_Limpio"] = df_usu["PIN"].astype(str).str.replace('.0', '', regex=False).str.strip()
+            
+            data = df_usu[(df_usu["Nombre"] == user) & (df_usu["PIN_Limpio"] == pin.strip())]
             if not data.empty:
                 st.session_state.update({'usuario': user, 'rol': data["Rol"].values[0]})
                 st.rerun()
             else:
                 st.error("Credenciales incorrectas")
     st.stop()
-
 # --- 4. APLICACIÓN PRINCIPAL (ROLES) ---
 st.sidebar.write(f"👤 **{st.session_state.usuario}**")
 if st.sidebar.button("Cerrar Sesión"):
