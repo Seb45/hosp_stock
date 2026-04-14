@@ -340,16 +340,19 @@ elif st.session_state.rol == "Roperia":
 # ==========================================
 # ROL: PISO (ENFERMERÍA / MÉDICOS)
 # ==========================================
+# ==========================================
+# ROL: PISO (SOLO PARTE 1 PARA TEST)
+# ==========================================
 if st.session_state["rol"] == "Piso":
     st.header(f"🏥 Panel de {st.session_state['usuario']}")
     
-    # --- PARTE 1: ACCIONES INMEDIATAS ---
     st.subheader("📋 Pendientes de Confirmación")
     
+    # CONSULTA CORREGIDA: Cambiamos ascending=False por desc=True
     res_p = supabase.table("movimientos").select("*")\
         .eq("responsable", st.session_state["usuario"])\
         .eq("estado", "Pendiente")\
-        .order("fecha_hora", ascending=False).execute()
+        .order("fecha_hora", desc=True).execute() # <--- EL CAMBIO ESTÁ AQUÍ
     
     pendientes_data = res_p.data
     
@@ -358,15 +361,20 @@ if st.session_state["rol"] == "Piso":
         for item in pendientes_data:
             with st.container():
                 col_info, col_ok, col_ko = st.columns([3, 0.5, 0.5])
+                
                 with col_info:
                     st.markdown(f"**{item['insumo']}** — Cantidad: `{item['cantidad']}`")
                     st.caption(f"Sector: {item['sector']} | ID: {item['id_mov']}")
+                
                 with col_ok:
+                    # Botón Verde
                     if st.button("✅", key=f"ok_{item['id']}"):
                         supabase.table("movimientos").update({"estado": "Aprobado"}).eq("id", item['id']).execute()
                         st.toast(f"✅ {item['insumo']} aprobado")
                         st.rerun()
+                
                 with col_ko:
+                    # Botón Rojo
                     if st.button("❌", key=f"ko_{item['id']}"):
                         supabase.table("movimientos").update({"estado": "Rechazado"}).eq("id", item['id']).execute()
                         st.toast(f"❌ {item['insumo']} rechazado")
@@ -374,37 +382,3 @@ if st.session_state["rol"] == "Piso":
             st.markdown("---")
     else:
         st.info("No tienes movimientos pendientes.")
-
-    # --- PARTE 2: HISTORIAL CORREGIDO ---
-    st.divider()
-    st.subheader("📜 Mi Historial")
-    
-    col_f1, col_f2 = st.columns(2)
-    # Aquí usamos datetime directamente habiéndolo importado arriba del todo
-    hoy = datetime.date.today()
-    f_desde = col_f1.date_input("Desde", value=hoy - datetime.timedelta(days=7))
-    f_hasta = col_f2.date_input("Hasta", value=hoy)
-    
-    res_h = supabase.table("movimientos").select("*")\
-        .eq("responsable", st.session_state["usuario"])\
-        .gte("fecha_hora", f_desde.strftime("%Y-%m-%d 00:00:00"))\
-        .lte("fecha_hora", f_hasta.strftime("%Y-%m-%d 23:59:59"))\
-        .order("fecha_hora", ascending=False).execute()
-    
-    if res_h.data:
-        df_h = pd.DataFrame(res_h.data)
-        
-        # Formateo y Estilo
-        if 'estado' in df_h.columns:
-            df_h['Fecha/Hora'] = pd.to_datetime(df_h['fecha_hora']).dt.strftime('%d/%m/%y %H:%M')
-            
-            def color_estado(val):
-                if val == 'Aprobado': return 'background-color: #d4edda; color: #155724'
-                if val == 'Rechazado': return 'background-color: #f8d7da; color: #721c24'
-                return 'background-color: #fff3cd; color: #856404'
-            
-            df_mostrar = df_h[["Fecha/Hora", "tipo", "insumo", "cantidad", "estado"]]
-            st.dataframe(df_mostrar.style.applymap(color_estado, subset=['estado']), 
-                         hide_index=True, use_container_width=True)
-    else:
-        st.write("Sin registros en este rango.")
