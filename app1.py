@@ -133,16 +133,41 @@ if st.session_state.rol == "Roperia":
         sector = col_s.selectbox("Sector", df_sec["nombre"].tolist())
         turno = col_t.selectbox("Turno", ["Mañana", "Tarde", "Noche"])
         
+        # --- LÓGICA DE INSUMOS DINÁMICOS SIN DUPLICADOS ---
+        todos_insumos = df_ins["nombre"].tolist()
         items_data = []
+        
         for i in range(st.session_state.num_rows):
             c1, c2 = st.columns([3, 1])
-            ins = c1.selectbox(f"Insumo {i+1}", df_ins["nombre"].tolist(), key=f"i_{i}")
-            cant = c2.number_input(f"Cant {i+1}", min_value=1, key=f"c_{i}")
-            items_data.append({"insumo": ins, "cantidad": cant})
+            key_insumo = f"i_{i}"
+            key_cant = f"c_{i}"
             
-        if st.button("➕ Añadir Insumo"):
-            st.session_state.num_rows += 1
-            st.rerun()
+            # 1. Miramos qué insumos ya están seleccionados en las OTRAS filas
+            otros_seleccionados = [
+                st.session_state[f"i_{j}"] 
+                for j in range(st.session_state.num_rows) 
+                if j != i and f"i_{j}" in st.session_state
+            ]
+            
+            # 2. Dejamos solo las opciones que nadie más está usando
+            opciones_disponibles = [ins for ins in todos_insumos if ins not in otros_seleccionados]
+            
+            # 3. Dibujamos la fila
+            if opciones_disponibles:
+                ins = c1.selectbox(f"Insumo {i+1}", opciones_disponibles, key=key_insumo)
+                cant = c2.number_input(f"Cant {i+1}", min_value=1, key=key_cant)
+                items_data.append({"insumo": ins, "cantidad": cant})
+            else:
+                st.warning(f"Fila {i+1}: No hay más tipos de insumos para agregar.")
+            
+        # 4. Solo mostramos el botón "+ Añadir" si todavía quedan insumos libres en el catálogo
+        if st.session_state.num_rows < len(todos_insumos):
+            if st.button("➕ Añadir Insumo"):
+                st.session_state.num_rows += 1
+                st.rerun()
+        else:
+            st.info("💡 Has seleccionado todos los tipos de insumos disponibles en el catálogo.")
+        # --------------------------------------------------
 
         responsable = st.selectbox("Responsable (Piso)", df_usu[df_usu["rol"] == "Piso"]["nombre"].tolist())
 
