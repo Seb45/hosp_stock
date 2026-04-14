@@ -44,16 +44,19 @@ df_mov = cargar_movimientos()
 # --- 3. LÓGICA DE VALIDACIÓN POR QR ---
 params = st.query_params
 if "confirmar_id" in params:
-    # 1. Limpieza extrema del ID (evita que Streamlit lo lea como lista o con espacios en el celular)
-    id_bruto = params["confirmar_id"]
-    id_a_confirmar = id_bruto[0] if isinstance(id_bruto, list) else id_bruto
-    id_a_confirmar = str(id_a_confirmar).strip()
-    
     st.title("📱 Validación de Recepción")
     
-    # 2. CONSULTA DIRECTA A SUPABASE (A prueba de balas)
-    respuesta = supabase.table("movimientos").select("*").eq("id_mov", id_a_confirmar).execute()
-    movimientos_pendientes = pd.DataFrame(respuesta.data)
+    # 1. Limpieza EXTREMA (Aspiradora de caracteres): 
+    # Quitamos espacios invisibles, corchetes o barras que inyecte el celular.
+    # Esto deja ÚNICAMENTE letras y números limpios.
+    id_bruto = str(params["confirmar_id"])
+    id_a_confirmar = "".join(c for c in id_bruto if c.isalnum())
+    
+    # 2. Limpiamos también la tabla descargada temporalmente para que el cruce sea perfecto
+    df_mov['id_limpio'] = df_mov['id_mov'].astype(str).apply(lambda x: "".join(c for c in x if c.isalnum()))
+    
+    # 3. Cruzamos los datos
+    movimientos_pendientes = df_mov[df_mov['id_limpio'] == id_a_confirmar]
     
     if not movimientos_pendientes.empty:
         if movimientos_pendientes.iloc[0]["estado"] == "Confirmado":
@@ -62,8 +65,8 @@ if "confirmar_id" in params:
             st.info(f"**Sector:** {movimientos_pendientes.iloc[0]['sector']}")
             st.write("**Detalle de insumos:**")
             
-            # Mostrar tabla limpia
-            columnas_tecnicas = ["id", "id_mov", "estado", "usuario_carga", "responsable", "sector", "turno", "fecha_hora"]
+            # Ocultamos columnas técnicas
+            columnas_tecnicas = ["id", "id_mov", "id_limpio", "estado", "usuario_carga", "responsable", "sector", "turno", "fecha_hora"]
             df_mostrar = movimientos_pendientes.drop(columns=columnas_tecnicas, errors="ignore")
             st.dataframe(df_mostrar, hide_index=True)
             
@@ -78,17 +81,18 @@ if "confirmar_id" in params:
                     pin_real = str(usuario_data["pin"].values[0]).strip()
                     
                     if pin_ingresado.strip() == pin_real:
-                        # ACTUALIZACIÓN EN BASE DE DATOS
-                        supabase.table("movimientos").update({"estado": "Confirmado"}).eq("id_mov", id_a_confirmar).execute()
+                        # Usamos el ID original exacto para que Supabase lo reconozca al guardar
+                        id_original = str(movimientos_pendientes.iloc[0]["id_mov"])
+                        supabase.table("movimientos").update({"estado": "Confirmado"}).eq("id_mov", id_original).execute()
                         st.success("✅ Firma digital registrada con éxito.")
                         st.balloons()
                     else:
                         st.error("PIN incorrecto.")
     else:
-        # Este mensaje de error te mostrará exactamente qué está leyendo el celular
-        st.error(f"Transacción '{id_a_confirmar}' no encontrada o código expirado.")
+        # Modo diagnóstico: si falla, te mostrará qué está viendo Python realmente
+        st.error(f"Transacción '{id_a_confirmar}' no encontrada.")
+        st.warning(f"Últimos IDs registrados en la base: {df_mov['id_limpio'].head(3).tolist()}")
     st.stop()
-
 
 # --- 4. SISTEMA DE LOGIN ---
 if 'usuario' not in st.session_state:
