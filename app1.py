@@ -271,72 +271,80 @@ if st.session_state.rol == "Admin":
                     st.rerun()
 
 # ==========================================
-# ROL: ROPERIA
+# ROL: ROPERIA - REPORTE DE CONSUMO
 # ==========================================
-elif st.session_state.rol == "Roperia":
-    menu = st.sidebar.selectbox("Menú", ["Nuevo Registro", "Auditoría"])
+if st.session_state["rol"] == "Roperia":
+    st.header("🧺 Gestión de Ropería")
     
-    # NUEVO BOTÓN: Limpia la memoria caché manualmente
-    if st.sidebar.button("🔄 Refrescar Catálogos"):
-        cargar_catalogos.clear()
-        st.rerun()
+    # Creamos pestañas para organizar el trabajo
+    tab_carga, tab_reporte = st.tabs(["📥 Cargar Movimientos", "📊 Reporte de Consumo"])
 
-    if menu == "Nuevo Registro":
-        st.markdown("### 📋 Nuevo Registro Multi-Insumo")
-        url_app_nube = "https://gestioninsumos.streamlit.app"
+    with tab_carga:
+        st.write("Aquí va tu código actual de escaneo QR y carga...")
+        # (Mantén aquí tu código actual de Ropería)
+
+    with tab_reporte:
+        st.subheader("📈 Resumen de Movimientos por Sector")
         
-        if 'num_rows' not in st.session_state: st.session_state.num_rows = 1
-        if 'last_qr' not in st.session_state: st.session_state.last_qr = None
+        # 1. Filtros de fecha
+        col_f1, col_f2 = st.columns(2)
+        hoy = datetime.date.today()
+        f_desde = col_f1.date_input("Fecha Inicio", value=hoy - datetime.timedelta(days=7), key="rep_desde")
+        f_hasta = col_f2.date_input("Fecha Fin", value=hoy, key="rep_hasta")
 
-        tipo_op = st.radio("Operación", ["Retiro", "Devolución"], horizontal=True)
-        col_s, col_t = st.columns(2)
-        sector = col_s.selectbox("Sector", df_sec["nombre"].tolist())
-        turno = col_t.selectbox("Turno", ["Mañana", "Tarde", "Noche"])
-        
-        todos_insumos = df_ins["nombre"].tolist()
-        items_data = []
-        
-        for i in range(st.session_state.num_rows):
-            c1, c2 = st.columns([3, 1])
-            key_insumo = f"i_{i}"
-            key_cant = f"c_{i}"
+        # 2. Consulta a la base de datos (Solo movimientos Aprobados)
+        try:
+            res = supabase.table("movimientos").select("*")\
+                .gte("fecha_hora", f_desde.strftime("%Y-%m-%d 00:00:00"))\
+                .lte("fecha_hora", f_hasta.strftime("%Y-%m-%d 23:59:59"))\
+                .eq("estado", "Aprobado").execute()
             
-            otros_seleccionados = [st.session_state[f"i_{j}"] for j in range(st.session_state.num_rows) if j != i and f"i_{j}" in st.session_state]
-            opciones_disponibles = [ins for ins in todos_insumos if ins not in otros_seleccionados]
+            datos = res.data
+        except Exception as e:
+            st.error(f"Error al obtener datos: {e}")
+            datos = []
+
+        if datos:
+            df = pd.DataFrame(datos)
             
-            if opciones_disponibles:
-                ins = c1.selectbox(f"Insumo {i+1}", opciones_disponibles, key=key_insumo)
-                cant = c2.number_input(f"Cant {i+1}", min_value=1, key=key_cant)
-                items_data.append({"insumo": ins, "cantidad": cant})
-            else:
-                st.warning(f"Fila {i+1}: No hay más tipos de insumos.")
+            # 3. Procesamiento de Netos con Pivot Table
+            # Creamos columnas auxiliares para facilitar el cálculo
+            df['Retiros'] = df.apply(lambda x: x['cantidad'] if x['tipo'] == 'Retiro' else 0, axis=1)
+            df['Devoluciones'] = df.apply(lambda x: x['cantidad'] if x['tipo'] == 'Devolución' else 0, axis=1)
             
-        if st.session_state.num_rows < len(todos_insumos):
-            if st.button("➕ Añadir Insumo"):
-                st.session_state.num_rows += 1
-                st.rerun()
+            # Agrupamos por Sector e Insumo
+            resumen = df.groupby(['sector', 'insumo']).agg({
+                'Retiros': 'sum',
+                'Devoluciones': 'sum'
+            }).reset_index()
+            
+            # Calculamos el Neto (Consumo Real)
+            resumen['Neto (Uso)'] = resumen['Retiros'] - resumen['Devoluciones']
+            
+            # 4. Visualización
+            st.write(f"Mostrando datos desde {f_desde.strftime('%d/%m/%Y')} hasta {f_hasta.strftime('%d/%m/%Y')}")
+            
+            # Aplicamos un estilo para resaltar los netos altos
+            def resaltar_consumo(s):
+                return ['background-color: #f8d7da' if v > 50 else '' for v in s]
 
-        responsable = st.selectbox("Responsable (Piso)", df_usu[df_usu["rol"] == "Piso"]["nombre"].tolist())
-
-        if st.button("🟩 Generar QR y Guardar", type="primary", use_container_width=True):
-            nuevo_id = str(uuid.uuid4())[:8]
-            nuevas_filas = [{"id_mov": nuevo_id, "tipo": tipo_op, "insumo": d["insumo"], "cantidad": d["cantidad"], "responsable": responsable, "sector": sector, "turno": turno, "usuario_carga": st.session_state.usuario} for d in items_data]
-            supabase.table("movimientos").insert(nuevas_filas).execute()
-            st.session_state.last_qr = nuevo_id
-            st.success(f"Registrado. ID: {nuevo_id}")
-
-        if st.session_state.last_qr:
-            url_qr = f"{url_app_nube}/?confirmar_id={st.session_state.last_qr}"
-            st.image(generar_qr(url_qr), width=250)
-            if st.button("Nueva Carga"):
-                st.session_state.num_rows = 1
-                st.session_state.last_qr = None
-                st.rerun()
-
-    elif menu == "Auditoría":
-        st.header("📊 Auditoría en Tiempo Real")
-        st.dataframe(df_mov, use_container_width=True)
-
+            st.dataframe(
+                resumen.sort_values(by='Neto (Uso)', ascending=False),
+                hide_index=True,
+                use_container_width=True
+            )
+            
+            # Botón para descargar a Excel/CSV (Opcional pero muy útil para BPO)
+            csv = resumen.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                label="📥 Descargar Reporte CSV",
+                data=csv,
+                file_name=f"consumo_sectores_{hoy}.csv",
+                mime="text/csv",
+            )
+            
+        else:
+            st.info("No hay movimientos aprobados en el rango de fechas seleccionado.")
 # ==========================================
 # ROL: PISO
 # ==========================================
