@@ -401,3 +401,53 @@ if st.session_state["rol"] == "Piso":
             st.markdown("---")
     else:
         st.info("No tienes movimientos pendientes en este momento.")
+
+# --- PARTE 2: HISTORIAL CON FILTROS ---
+    st.divider()
+    st.subheader("📜 Mi Historial de Movimientos")
+    
+    # Filtros de fecha en dos columnas
+    col_f1, col_f2 = st.columns(2)
+    hoy = datetime.date.today()
+    f_desde = col_f1.date_input("Desde", value=hoy - datetime.timedelta(days=7))
+    f_hasta = col_f2.date_input("Hasta", value=hoy)
+    
+    # Consulta al historial con los filtros aplicados
+    try:
+        res_h = supabase.table("movimientos").select("*")\
+            .eq("responsable", st.session_state["usuario"])\
+            .gte("fecha_hora", f_desde.strftime("%Y-%m-%d 00:00:00"))\
+            .lte("fecha_hora", f_hasta.strftime("%Y-%m-%d 23:59:59"))\
+            .order("fecha_hora", desc=True).execute()
+        
+        historial = res_h.data
+    except Exception as e:
+        st.error(f"Error al cargar el historial: {e}")
+        historial = []
+
+    if historial:
+        df_h = pd.DataFrame(historial)
+        
+        # 1. Formateamos la fecha para que se vea bien (DD/MM/YY HH:MM)
+        df_h['Fecha/Hora'] = pd.to_datetime(df_h['fecha_hora']).dt.strftime('%d/%m/%y %H:%M')
+        
+        # 2. Definimos los colores según el estado
+        def color_estado(val):
+            if val == 'Aprobado':
+                return 'background-color: #d4edda; color: #155724; font-weight: bold;'
+            if val == 'Rechazado':
+                return 'background-color: #f8d7da; color: #721c24; font-weight: bold;'
+            return 'background-color: #fff3cd; color: #856404;'
+
+        # 3. Seleccionamos las columnas para mostrar al usuario
+        # Usamos los nombres exactos que están en tu DataFrame
+        columnas_visibles = ["Fecha/Hora", "tipo", "insumo", "cantidad", "estado"]
+        
+        # 4. Renderizamos la tabla con estilo
+        st.dataframe(
+            df_h[columnas_visibles].style.applymap(color_estado, subset=['estado']),
+            hide_index=True,
+            use_container_width=True
+        )
+    else:
+        st.info("No hay registros en el rango de fechas seleccionado.")
