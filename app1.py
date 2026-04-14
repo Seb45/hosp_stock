@@ -44,7 +44,7 @@ df_mov = cargar_movimientos()
 # --- 3. LÓGICA DE VALIDACIÓN POR QR ---
 params = st.query_params
 if "confirmar_id" in params:
-    st.title("📱 Validación de Recepción")
+    st.title("📱 Validación de Recepción!")
     
     # 1. Limpieza EXTREMA (Aspiradora de caracteres): 
     # Quitamos espacios invisibles, corchetes o barras que inyecte el celular.
