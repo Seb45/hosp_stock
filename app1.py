@@ -133,12 +133,12 @@ if "confirmar_id" in st.query_params:
 
 # --- 5. PANTALLA DE ACCESO HÍBRIDO ---
 if st.session_state.usuario is None:
-    st.title("🔐 Acceso al Sistema Hospitalario")
+    st.title("🔐 Control stock insumos")
     
     col1, col2 = st.columns([1, 1])
     
     with col1:
-        st.subheader("Opción 1: Cuenta Institucional")
+        st.subheader("Opción 1: Cuenta Google")
         st.write("Acceso rápido con tu cuenta de Google.")
         res = supabase.auth.sign_in_with_oauth({"provider": "google", "options": {"redirect_to": "https://gestioninsumos.streamlit.app"}})
         st.link_button("🌐 Continuar con Google", res.url, type="primary")
