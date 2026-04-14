@@ -123,7 +123,7 @@ if st.session_state.rol == "Roperia":
     
     if menu == "Nuevo Registro":
         st.markdown("### 📋 Nuevo Registro Multi-Insumo")
-        url_app_nube = "https://stockinsumos.streamlit.app"
+        url_app_nube = "https://gestioninsumos.streamlit.app"
         
         if 'num_rows' not in st.session_state: st.session_state.num_rows = 1
         if 'last_qr' not in st.session_state: st.session_state.last_qr = None
