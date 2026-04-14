@@ -337,12 +337,71 @@ elif st.session_state.rol == "Roperia":
         st.dataframe(df_mov, use_container_width=True)
 
 # ==========================================
-# ROL: PISO
+# ROL: PISO (ENFERMERÍA / MÉDICOS)
 # ==========================================
-elif st.session_state.rol == "Piso":
-    st.header("🛎️ Mis Tareas Pendientes")
-    pendientes = df_mov[(df_mov["responsable"] == st.session_state.usuario) & (df_mov["estado"] == "Pendiente")]
-    if pendientes.empty:
-        st.success("Todo al día.")
+if st.session_state["rol"] == "Piso":
+    st.header(f"🏥 Panel de {st.session_state['usuario']}")
+    
+    # --- PARTE 1: PENDIENTES DE CONFIRMACIÓN ---
+    st.subheader("📋 Mis Pendientes de Confirmación")
+    # Filtramos movimientos donde el usuario es el responsable y el estado es 'Pendiente'
+    df_pendientes = supabase.table("movimientos")\
+        .select("*")\
+        .eq("responsable", st.session_state["usuario"])\
+        .eq("estado", "Pendiente").execute().data
+    
+    if df_pendientes:
+        df_p = pd.DataFrame(df_pendientes)
+        # Mostramos una tabla simplificada de lo que tiene que aprobar
+        st.dataframe(df_p[["id", "fecha", "tipo", "insumo", "cantidad", "sector"]], 
+                     hide_index=True, use_container_width=True)
+        
+        col_sel, col_acc = st.columns([1, 1])
+        with col_sel:
+            id_operacion = st.selectbox("Seleccione ID para confirmar/rechazar", df_p["id"].tolist())
+        
+        with col_acc:
+            c1, c2 = st.columns(2)
+            if c1.button("✅ Aprobar", type="primary", use_container_width=True):
+                supabase.table("movimientos").update({"estado": "Aprobado"}).eq("id", id_operacion).execute()
+                st.success(f"Movimiento {id_operacion} aprobado.")
+                st.rerun()
+            if c2.button("❌ Rechazar", type="secondary", use_container_width=True):
+                supabase.table("movimientos").update({"estado": "Rechazado"}).eq("id", id_operacion).execute()
+                st.warning(f"Movimiento {id_operacion} rechazado.")
+                st.rerun()
     else:
-        st.dataframe(pendientes[["id_mov", "fecha_hora", "tipo", "cantidad", "insumo"]])
+        st.info("No tienes movimientos pendientes de confirmación.")
+
+    st.divider()
+
+    # --- PARTE 2: HISTORIAL CON FILTROS ---
+    st.subheader("📜 Mi Historial de Movimientos")
+    
+    # Filtros de fecha
+    col_f1, col_f2 = st.columns(2)
+    fecha_default_desde = datetime.date.today() - datetime.timedelta(days=7)
+    
+    f_desde = col_f1.date_input("Fecha Desde", value=fecha_default_desde)
+    f_hasta = col_f2.date_input("Fecha Hasta", value=datetime.date.today())
+    
+    # Consulta con filtros de fecha y usuario
+    # Nota: Usamos gte (greater than or equal) y lte (less than or equal)
+    historial = supabase.table("movimientos")\
+        .select("*")\
+        .eq("responsable", st.session_state["usuario"])\
+        .gte("fecha", f_desde.isoformat())\
+        .lte("fecha", f_hasta.isoformat())\
+        .order("fecha", ascending=False).execute().data
+    
+    if historial:
+        df_h = pd.DataFrame(historial)
+        # Aplicamos colores según el estado para mejor visualización
+        def color_estado(val):
+            color = '#90ee90' if val == 'Aprobado' else '#ffcccb' if val == 'Rechazado' else '#fffacd'
+            return f'background-color: {color}'
+        
+        st.dataframe(df_h[["fecha", "tipo", "insumo", "cantidad", "sector", "estado"]].style.applymap(color_estado, subset=['estado']), 
+                     hide_index=True, use_container_width=True)
+    else:
+        st.write("No hay registros en el rango de fechas seleccionado.")
