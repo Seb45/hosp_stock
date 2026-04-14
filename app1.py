@@ -344,7 +344,7 @@ if st.session_state["rol"] == "Roperia":
         f_hasta = col_r2.date_input("Fecha Fin", value=hoy, key="rep_hasta")
 
         try:
-            # FILTRO CRÍTICO: .eq("estado", "Aprobado") garantiza que solo sumamos lo confirmado
+            # FILTRO CRÍTICO: .eq("estado", "Confirmado") garantiza que solo sumamos lo confirmado
             res = supabase.table("movimientos").select("*")\
                 .gte("fecha_hora", f_desde.strftime("%Y-%m-%d 00:00:00"))\
                 .lte("fecha_hora", f_hasta.strftime("%Y-%m-%d 23:59:59"))\
