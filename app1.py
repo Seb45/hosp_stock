@@ -402,57 +402,47 @@ if st.session_state["rol"] == "Piso":
     else:
         st.info("No tienes movimientos pendientes en este momento.")
 
-st.markdown("---")
-st.subheader("📜 Historial de Movimientos")
 
-col_desde, col_hasta = st.columns(2)
-with col_desde:
-    fecha_desde = st.date_input(
-        "Desde",
-        value=datetime.now().date() - timedelta(days=7),
-        key="hist_desde"
-    )
-with col_hasta:
-    fecha_hasta = st.date_input(
-        "Hasta",
-        value=datetime.now().date(),
-        key="hist_hasta"
-    )
+# --- PARTE 2: HISTORIAL CON FILTROS ---
+    st.divider()
+    st.subheader("📜 Mi Historial de Movimientos")
+    
+    col_f1, col_f2 = st.columns(2)
+    hoy = datetime.date.today()
+    f_desde = col_f1.date_input("Desde", value=hoy - datetime.timedelta(days=7))
+    f_hasta = col_f2.date_input("Hasta", value=hoy)
+    
+    try:
+        res_h = supabase.table("movimientos").select("*")\
+            .eq("responsable", st.session_state["usuario"])\
+            .gte("fecha_hora", f_desde.strftime("%Y-%m-%d 00:00:00"))\
+            .lte("fecha_hora", f_hasta.strftime("%Y-%m-%d 23:59:59"))\
+            .order("fecha_hora", desc=True).execute()
+        
+        historial = res_h.data
+    except Exception as e:
+        st.error(f"Error al cargar el historial: {e}")
+        historial = []
 
-try:
-    res_h = supabase.table("movimientos").select("*")\
-        .eq("responsable", st.session_state["usuario"])\
-        .gte("fecha_hora", fecha_desde.isoformat())\
-        .lte("fecha_hora", (fecha_hasta + timedelta(days=1)).isoformat())\
-        .order("fecha_hora", desc=True)\
-        .execute()
-    historial_data = res_h.data
-except Exception as e:
-    st.error(f"Error al consultar historial: {e}")
-    historial_data = []
+    if historial:
+        df_h = pd.DataFrame(historial)
+        
+        # 1. Limpieza de datos y nombres
+        df_h['Fecha/Hora'] = pd.to_datetime(df_h['fecha_hora']).dt.strftime('%d/%m/%y %H:%M')
+        df_mostrar = df_h[["Fecha/Hora", "tipo", "insumo", "cantidad", "estado"]].copy()
+        
+        # 2. Función de color (la misma de antes)
+        def color_estado(val):
+            if val == 'Aprobado': return 'background-color: #d4edda; color: #155724'
+            if val == 'Rechazado': return 'background-color: #f8d7da; color: #721c24'
+            return 'background-color: #fff3cd; color: #856404'
 
-if historial_data:
-    # Agrupar por id_mov igual que en pendientes
-    hist_grupos = {}
-    for item in historial_data:
-        id_mov = item["id_mov"]
-        if id_mov not in hist_grupos:
-            hist_grupos[id_mov] = {
-                "id_mov": id_mov,
-                "sector": item["sector"],
-                "fecha_hora": item["fecha_hora"],
-                "estado": item["estado"],
-                "insumos": []
-            }
-        hist_grupos[id_mov]["insumos"].append(f"{item['insumo']} x{item['cantidad']}")
-
-    for id_mov, grupo in hist_grupos.items():
-        estado = grupo["estado"]
-        icono = "✅" if estado == "Aprobado" else "❌" if estado == "Rechazado" else "⏳"
-        with st.container():
-            st.markdown(f"{icono} **Pedido:** `{id_mov}` — **{estado}**")
-            st.markdown(" · ".join(grupo["insumos"]))
-            st.caption(f"Sector: {grupo['sector']} | Fecha: {grupo['fecha_hora'][:16]}")
-        st.markdown("---")
-else:
-    st.info("No hay movimientos en el período seleccionado.")
+        # 3. MÉTODO COMPATIBLE: Usamos .apply en lugar de .applymap o .map
+        # Esto funciona en Pandas viejo, nuevo y futuro.
+        st.dataframe(
+            df_mostrar.style.apply(lambda x: [color_estado(v) for v in x], subset=['estado']),
+            hide_index=True,
+            use_container_width=True
+        )
+    else:
+        st.info("No hay registros en el rango de fechas seleccionado.")
