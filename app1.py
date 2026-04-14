@@ -342,10 +342,10 @@ elif st.session_state.rol == "Roperia":
 if st.session_state["rol"] == "Piso":
     st.header(f"🏥 Panel de {st.session_state['usuario']}")
     
-    # --- PARTE 1: ACCIONES INMEDIATAS ---
+    # --- PARTE 1: ACCIONES INMEDIATAS (Botones Directos) ---
     st.subheader("📋 Pendientes de Confirmación")
     
-    # Traemos los datos frescos
+    # Traemos datos frescos de la DB
     pendientes_data = supabase.table("movimientos")\
         .select("*")\
         .eq("responsable", st.session_state["usuario"])\
@@ -353,43 +353,43 @@ if st.session_state["rol"] == "Piso":
         .order("fecha_hora", ascending=False).execute().data
     
     if pendientes_data:
-        # Encabezado de "tabla" manual para que sea legible en móvil
-        st.markdown("---")
         for item in pendientes_data:
-            # Creamos una fila con columnas: Info del insumo | Botón Verde | Botón Rojo
-            col_info, col_ok, col_ko = st.columns([3, 1, 1])
-            
-            with col_info:
-                st.write(f"**{item['insumo']}** ({item['cantidad']} ud)")
-                st.caption(f"ID: {item['id_mov']} | Sector: {item['sector']}")
-            
-            with col_ok:
-                # Botón pequeño verde (usamos el ID único de la fila de la DB)
-                if st.button("✅", key=f"ok_{item['id']}", help="Aprobar"):
-                    supabase.table("movimientos").update({"estado": "Aprobado"}).eq("id", item['id']).execute()
-                    st.toast(f"Aprobado: {item['insumo']}") # Notificación pequeña
-                    st.rerun()
-            
-            with col_ko:
-                # Botón pequeño rojo
-                if st.button("❌", key=f"ko_{item['id']}", help="Rechazar"):
-                    supabase.table("movimientos").update({"estado": "Rechazado"}).eq("id", item['id']).execute()
-                    st.toast(f"Rechazado: {item['insumo']}")
-                    st.rerun()
-            st.markdown("---")
+            # Creamos un contenedor tipo "tarjeta"
+            with st.container():
+                col_info, col_ok, col_ko = st.columns([3, 1, 1])
+                
+                with col_info:
+                    st.write(f"**{item['insumo']}**")
+                    st.caption(f"Cantidad: {item['cantidad']} | Sector: {item['sector']} | ID: {item['id_mov']}")
+                
+                with col_ok:
+                    # Botón verde de aprobación
+                    if st.button("✅", key=f"ok_{item['id']}", help="Aprobar recepción"):
+                        supabase.table("movimientos").update({"estado": "Aprobado"}).eq("id", item['id']).execute()
+                        st.toast(f"✅ {item['insumo']} Aprobado")
+                        st.rerun()
+                
+                with col_ko:
+                    # Botón rojo de rechazo
+                    if st.button("❌", key=f"ko_{item['id']}", help="Rechazar recepción"):
+                        supabase.table("movimientos").update({"estado": "Rechazado"}).eq("id", item['id']).execute()
+                        st.toast(f"❌ {item['insumo']} Rechazado")
+                        st.rerun()
+                st.markdown("---")
     else:
-        st.info("No tienes movimientos pendientes.")
+        st.info("No tienes movimientos pendientes de confirmación.")
 
-    # --- PARTE 2: HISTORIAL CORREGIDO ---
+    # --- PARTE 2: HISTORIAL (Filtros y Tabla) ---
+    st.divider()
     st.subheader("📜 Mi Historial")
     
     col_f1, col_f2 = st.columns(2)
     import datetime
-    fecha_hoy = datetime.date.today()
-    f_desde = col_f1.date_input("Desde", value=fecha_hoy - datetime.timedelta(days=7))
-    f_hasta = col_f2.date_input("Hasta", value=fecha_hoy)
+    hoy = datetime.date.today()
+    f_desde = col_f1.date_input("Desde", value=hoy - datetime.timedelta(days=7))
+    f_hasta = col_f2.date_input("Hasta", value=hoy)
     
-    # Filtro robusto: convertimos a string para comparar con la columna timestamptz de Postgres
+    # Consulta robusta con strings de fecha
     hist_data = supabase.table("movimientos")\
         .select("*")\
         .eq("responsable", st.session_state["usuario"])\
@@ -400,18 +400,22 @@ if st.session_state["rol"] == "Piso":
     if hist_data:
         df_h = pd.DataFrame(hist_data)
         
-        # Formateamos la fecha para que sea más legible en la tabla
-        df_h['fecha_hora'] = pd.to_datetime(df_h['fecha_hora']).dt.strftime('%d/%m %H:%M')
+        # Formateo de fecha para visualización
+        df_h['Fecha/Hora'] = pd.to_datetime(df_h['fecha_hora']).dt.strftime('%d/%m/%y %H:%M')
         
+        # Función de colores para el estado
         def color_estado(val):
             if val == 'Aprobado': return 'background-color: #d4edda; color: #155724'
             if val == 'Rechazado': return 'background-color: #f8d7da; color: #721c24'
             return 'background-color: #fff3cd; color: #856404'
         
-        # Mostramos la tabla limpia
+        # Seleccionamos y renombramos columnas para la tabla final
+        df_final = df_h[["Fecha/Hora", "tipo", "insumo", "cantidad", "estado"]].copy()
+        
         st.dataframe(
-            df_h[["fecha_hora", "tipo", "insumo", "cantidad", "estado"]].style.applymap(color_estado, subset=['estado']),
-            hide_index=True, use_container_width=True
+            df_final.style.applymap(color_estado, subset=['estado']),
+            hide_index=True, 
+            use_container_width=True
         )
     else:
-        st.write("Sin registros en estas fechas.")
+        st.write("No se encontraron registros en el rango seleccionado.")
