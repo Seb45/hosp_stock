@@ -338,28 +338,30 @@ elif st.session_state.rol == "Roperia":
         st.dataframe(df_mov, use_container_width=True)
 
 # ==========================================
-# ROL: PISO (ENFERMERÍA / MÉDICOS)
-# ==========================================
-# ==========================================
-# ROL: PISO (SOLO PARTE 1 PARA TEST)
+# ROL: PISO - CORRECCIÓN DE ERROR TÉCNICO
 # ==========================================
 if st.session_state["rol"] == "Piso":
     st.header(f"🏥 Panel de {st.session_state['usuario']}")
     
     st.subheader("📋 Pendientes de Confirmación")
     
-    # CONSULTA CORREGIDA: Cambiamos ascending=False por desc=True
-    res_p = supabase.table("movimientos").select("*")\
-        .eq("responsable", st.session_state["usuario"])\
-        .eq("estado", "Pendiente")\
-        .order("fecha_hora", desc=True).execute() # <--- EL CAMBIO ESTÁ AQUÍ
-    
-    pendientes_data = res_p.data
+    # CONSULTA CORREGIDA PARA SUPABASE
+    try:
+        res_p = supabase.table("movimientos").select("*")\
+            .eq("responsable", st.session_state["usuario"])\
+            .eq("estado", "Pendiente")\
+            .order("fecha_hora", desc=True).execute() # <--- CAMBIO: desc=True en lugar de ascending
+        
+        pendientes_data = res_p.data
+    except Exception as e:
+        st.error(f"Error al consultar pendientes: {e}")
+        pendientes_data = []
     
     if pendientes_data:
         st.write("Confirme o rechace cada insumo recibido:")
         for item in pendientes_data:
             with st.container():
+                # Layout de 3 columnas para acción directa
                 col_info, col_ok, col_ko = st.columns([3, 0.5, 0.5])
                 
                 with col_info:
@@ -367,18 +369,18 @@ if st.session_state["rol"] == "Piso":
                     st.caption(f"Sector: {item['sector']} | ID: {item['id_mov']}")
                 
                 with col_ok:
-                    # Botón Verde
-                    if st.button("✅", key=f"ok_{item['id']}"):
+                    # Botón de Aprobación
+                    if st.button("✅", key=f"ok_check_{item['id']}", help="Aprobar"):
                         supabase.table("movimientos").update({"estado": "Aprobado"}).eq("id", item['id']).execute()
                         st.toast(f"✅ {item['insumo']} aprobado")
                         st.rerun()
                 
                 with col_ko:
-                    # Botón Rojo
-                    if st.button("❌", key=f"ko_{item['id']}"):
+                    # Botón de Rechazo
+                    if st.button("❌", key=f"ko_check_{item['id']}", help="Rechazar"):
                         supabase.table("movimientos").update({"estado": "Rechazado"}).eq("id", item['id']).execute()
                         st.toast(f"❌ {item['insumo']} rechazado")
                         st.rerun()
             st.markdown("---")
     else:
-        st.info("No tienes movimientos pendientes.")
+        st.info("No tienes movimientos pendientes en este momento.")
