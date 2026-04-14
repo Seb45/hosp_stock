@@ -159,22 +159,16 @@ if st.session_state.usuario is None:
     st.stop()
 
 
-# --- 6. APLICACIÓN PRINCIPAL (ROLES) ---
-
 # --- 7. APLICACIÓN PRINCIPAL (ROLES) ---
 st.sidebar.write(f"👤 **{st.session_state['usuario']}**")
 st.sidebar.write(f"🏷️ Rol: **{st.session_state['rol']}**")
-
-# NUEVO BOTÓN: Limpia la memoria caché manualmente
-if st.sidebar.button("🔄 Refrescar Catálogos"):
-    cargar_catalogos.clear()
-    st.rerun()
 
 if st.sidebar.button("Cerrar Sesión"):
     supabase.auth.sign_out()
     st.session_state["usuario"] = None
     st.session_state["rol"] = None
     st.rerun()
+    
     
 # ==========================================
 # ROL: ADMINISTRADOR
@@ -257,6 +251,11 @@ if st.session_state.rol == "Admin":
 elif st.session_state.rol == "Roperia":
     menu = st.sidebar.selectbox("Menú", ["Nuevo Registro", "Auditoría"])
     
+    # NUEVO BOTÓN: Limpia la memoria caché manualmente
+    if st.sidebar.button("🔄 Refrescar Catálogos"):
+        cargar_catalogos.clear()
+        st.rerun()
+
     if menu == "Nuevo Registro":
         st.markdown("### 📋 Nuevo Registro Multi-Insumo")
         url_app_nube = "https://gestioninsumos.streamlit.app"
