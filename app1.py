@@ -381,12 +381,12 @@ if st.session_state["rol"] == "Piso":
                     st.caption(f"Sector: {grupo['sector']} | Fecha: {grupo['fecha_hora'][:16]}")
 
                 with col_ok:
-                    if st.button("✅", key=f"piso_ok_{id_mov}", help="Aprobar todo el pedido"):
+                    if st.button("✅", key=f"piso_ok_{id_mov}", help="Confirmar todo el pedido"):
                         supabase.table("movimientos")\
                             .update({"estado": "Confirmado"})\
                             .eq("id_mov", id_mov)\
                             .execute()
-                        st.toast(f"✅ Pedido {id_mov} aprobado")
+                        st.toast(f"✅ Pedido {id_mov} Confirmado")
                         st.rerun()
 
                 with col_ko:
