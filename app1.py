@@ -109,7 +109,7 @@ if "confirmar_id" in st.query_params:
                     else:
                         st.warning(f"⚠️ Esta transacción pertenece a **{responsable}**.")
                         st.write("Debes iniciar sesión con Google para firmar.")
-                        res = supabase.auth.sign_in_with_oauth({"provider": "google", "options": {"redirect_to": f"https://stockinsumos.streamlit.app/?confirmar_id={id_a_confirmar}"}})
+                        res = supabase.auth.sign_in_with_oauth({"provider": "google", "options": {"redirect_to": f"https://gestioninsumos.streamlit.app/?confirmar_id={id_a_confirmar}"}})
                         st.link_button("🌐 Iniciar sesión para Firmar", res.url)
                 else:
                     st.write(f"👤 **Firma manual requerida para: {responsable}**")
@@ -139,7 +139,7 @@ if st.session_state.usuario is None:
     with col1:
         st.subheader("Opción 1: Cuenta Institucional")
         st.write("Acceso rápido con tu cuenta de Google.")
-        res = supabase.auth.sign_in_with_oauth({"provider": "google", "options": {"redirect_to": "https://stockinsumos.streamlit.app"}})
+        res = supabase.auth.sign_in_with_oauth({"provider": "google", "options": {"redirect_to": "https://gestioninsumos.streamlit.app"}})
         st.link_button("🌐 Continuar con Google", res.url, type="primary")
     
     with col2:
@@ -250,7 +250,7 @@ elif st.session_state.rol == "Roperia":
     
     if menu == "Nuevo Registro":
         st.markdown("### 📋 Nuevo Registro Multi-Insumo")
-        url_app_nube = "https://stockinsumos.streamlit.app"
+        url_app_nube = "https://gestioninsumos.streamlit.app"
         
         if 'num_rows' not in st.session_state: st.session_state.num_rows = 1
         if 'last_qr' not in st.session_state: st.session_state.last_qr = None
