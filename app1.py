@@ -270,81 +270,116 @@ if st.session_state.rol == "Admin":
                     cargar_catalogos.clear()
                     st.rerun()
 
+
 # ==========================================
-# ROL: ROPERIA - REPORTE DE CONSUMO
+# ROL: ROPERIA
 # ==========================================
 if st.session_state["rol"] == "Roperia":
     st.header("🧺 Gestión de Ropería")
     
-    # Creamos pestañas para organizar el trabajo
+    # Creamos las dos pestañas
     tab_carga, tab_reporte = st.tabs(["📥 Cargar Movimientos", "📊 Reporte de Consumo"])
 
     with tab_carga:
-        st.write("Aquí va tu código actual de escaneo QR y carga...")
-        # (Mantén aquí tu código actual de Ropería)
+        st.subheader("Registro de Entregas y Devoluciones")
+        
+        # 1. Generador de ID de Movimiento (para agrupar varios insumos en un solo pedido)
+        if "current_id_mov" not in st.session_state:
+            st.session_state["current_id_mov"] = str(uuid.uuid4())[:8].upper()
+        
+        col_id1, col_id2 = st.columns([3, 1])
+        with col_id1:
+            id_mov_act = st.text_input("ID de Pedido (Agrupador)", value=st.session_state["current_id_mov"])
+        with col_id2:
+            st.write("") # Espaciador
+            if st.button("Nuevo ID"):
+                st.session_state["current_id_mov"] = str(uuid.uuid4())[:8].upper()
+                st.rerun()
+
+        st.markdown("---")
+
+        # 2. Formulario de Carga
+        with st.form("form_movimiento", clear_on_submit=True):
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                insumo_sel = st.selectbox("Insumo", df_ins["nombre"].tolist())
+                cantidad_sel = st.number_input("Cantidad", min_value=1, step=1, value=1)
+                tipo_sel = st.selectbox("Operación", ["Retiro", "Devolución"])
+            
+            with col2:
+                # El responsable es quien luego verá esto en su panel de 'Piso'
+                responsable_sel = st.selectbox("Responsable (Quién recibe/entrega)", df_usu[df_usu["rol"]=="Piso"]["nombre"].tolist())
+                sector_sel = st.selectbox("Sector", df_sec["nombre"].tolist())
+            
+            submit = st.form_submit_button("Registrar Movimiento", type="primary", use_container_width=True)
+            
+            if submit:
+                nuevo_mov = {
+                    "id_mov": id_mov_act,
+                    "insumo": insumo_sel,
+                    "cantidad": cantidad_sel,
+                    "tipo": tipo_sel,
+                    "responsable": responsable_sel,
+                    "sector": sector_sel,
+                    "usuario": st.session_state["usuario"], # Quién lo carga (Ropería)
+                    "estado": "Pendiente", # Clave para que aparezca en el panel de Piso
+                    "fecha_hora": datetime.datetime.now().isoformat()
+                }
+                
+                try:
+                    supabase.table("movimientos").insert(nuevo_mov).execute()
+                    st.success(f"Registrado: {insumo_sel} x{cantidad_sel} para {responsable_sel}")
+                    st.toast("Movimiento guardado en la base de datos")
+                except Exception as e:
+                    st.error(f"Error al guardar: {e}")
 
     with tab_reporte:
-        st.subheader("📈 Resumen de Movimientos por Sector")
+        st.subheader("📊 Resumen Consolidado por Sector")
         
-        # 1. Filtros de fecha
-        col_f1, col_f2 = st.columns(2)
+        # Filtros de fecha para el reporte
+        col_r1, col_r2 = st.columns(2)
         hoy = datetime.date.today()
-        f_desde = col_f1.date_input("Fecha Inicio", value=hoy - datetime.timedelta(days=7), key="rep_desde")
-        f_hasta = col_f2.date_input("Fecha Fin", value=hoy, key="rep_hasta")
+        f_desde = col_r1.date_input("Fecha Inicio", value=hoy - datetime.timedelta(days=7), key="rep_desde")
+        f_hasta = col_r2.date_input("Fecha Fin", value=hoy, key="rep_hasta")
 
-        # 2. Consulta a la base de datos (Solo movimientos Aprobados)
         try:
+            # Solo traemos movimientos APROBADOS para el reporte de consumo real
             res = supabase.table("movimientos").select("*")\
                 .gte("fecha_hora", f_desde.strftime("%Y-%m-%d 00:00:00"))\
                 .lte("fecha_hora", f_hasta.strftime("%Y-%m-%d 23:59:59"))\
                 .eq("estado", "Aprobado").execute()
             
-            datos = res.data
+            if res.data:
+                df_rep = pd.DataFrame(res.data)
+                
+                # Cálculo de Retiros, Devoluciones y Netos
+                df_rep['Retiros'] = df_rep.apply(lambda x: x['cantidad'] if x['tipo'] == 'Retiro' else 0, axis=1)
+                df_rep['Devoluciones'] = df_rep.apply(lambda x: x['cantidad'] if x['tipo'] == 'Devolución' else 0, axis=1)
+                
+                resumen = df_rep.groupby(['sector', 'insumo']).agg({
+                    'Retiros': 'sum',
+                    'Devoluciones': 'sum'
+                }).reset_index()
+                
+                resumen['Neto (Consumo)'] = resumen['Retiros'] - resumen['Devoluciones']
+                
+                # Visualización
+                st.dataframe(
+                    resumen.sort_values(by='Neto (Consumo)', ascending=False),
+                    hide_index=True,
+                    use_container_width=True
+                )
+                
+                # Botón de descarga
+                csv = resumen.to_csv(index=False).encode('utf-8')
+                st.download_button("📥 Descargar Reporte CSV", csv, f"consumo_{hoy}.csv", "text/csv")
+            else:
+                st.info("No hay movimientos aprobados en este rango de fechas.")
         except Exception as e:
-            st.error(f"Error al obtener datos: {e}")
-            datos = []
+            st.error(f"Error al generar reporte: {e}")
 
-        if datos:
-            df = pd.DataFrame(datos)
-            
-            # 3. Procesamiento de Netos con Pivot Table
-            # Creamos columnas auxiliares para facilitar el cálculo
-            df['Retiros'] = df.apply(lambda x: x['cantidad'] if x['tipo'] == 'Retiro' else 0, axis=1)
-            df['Devoluciones'] = df.apply(lambda x: x['cantidad'] if x['tipo'] == 'Devolución' else 0, axis=1)
-            
-            # Agrupamos por Sector e Insumo
-            resumen = df.groupby(['sector', 'insumo']).agg({
-                'Retiros': 'sum',
-                'Devoluciones': 'sum'
-            }).reset_index()
-            
-            # Calculamos el Neto (Consumo Real)
-            resumen['Neto (Uso)'] = resumen['Retiros'] - resumen['Devoluciones']
-            
-            # 4. Visualización
-            st.write(f"Mostrando datos desde {f_desde.strftime('%d/%m/%Y')} hasta {f_hasta.strftime('%d/%m/%Y')}")
-            
-            # Aplicamos un estilo para resaltar los netos altos
-            def resaltar_consumo(s):
-                return ['background-color: #f8d7da' if v > 50 else '' for v in s]
 
-            st.dataframe(
-                resumen.sort_values(by='Neto (Uso)', ascending=False),
-                hide_index=True,
-                use_container_width=True
-            )
-            
-            # Botón para descargar a Excel/CSV (Opcional pero muy útil para BPO)
-            csv = resumen.to_csv(index=False).encode('utf-8')
-            st.download_button(
-                label="📥 Descargar Reporte CSV",
-                data=csv,
-                file_name=f"consumo_sectores_{hoy}.csv",
-                mime="text/csv",
-            )
-            
-        else:
-            st.info("No hay movimientos aprobados en el rango de fechas seleccionado.")
 # ==========================================
 # ROL: PISO
 # ==========================================
