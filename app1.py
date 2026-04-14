@@ -342,74 +342,76 @@ elif st.session_state.rol == "Roperia":
 if st.session_state["rol"] == "Piso":
     st.header(f"🏥 Panel de {st.session_state['usuario']}")
     
-    # --- PARTE 1: PENDIENTES DE CONFIRMACIÓN ---
-    st.subheader("📋 Mis Pendientes de Confirmación")
+    # --- PARTE 1: ACCIONES INMEDIATAS ---
+    st.subheader("📋 Pendientes de Confirmación")
     
-    # Consultamos movimientos pendientes para este usuario
-    df_pendientes_data = supabase.table("movimientos")\
+    # Traemos los datos frescos
+    pendientes_data = supabase.table("movimientos")\
         .select("*")\
         .eq("responsable", st.session_state["usuario"])\
-        .eq("estado", "Pendiente").execute().data
-    
-    if df_pendientes_data:
-        df_p = pd.DataFrame(df_pendientes_data)
-        
-        # CORRECCIÓN: Usamos 'fecha_hora' e 'id_mov' que son los nombres reales en tu DB
-        cols_a_mostrar = ["id_mov", "fecha_hora", "tipo", "insumo", "cantidad", "sector"]
-        st.dataframe(df_p[cols_a_mostrar], hide_index=True, use_container_width=True)
-        
-        col_sel, col_acc = st.columns([1, 1])
-        with col_sel:
-            # Agrupamos por id_mov para que apruebe el grupo completo de insumos de ese QR
-            lista_ids = df_p["id_mov"].unique().tolist()
-            id_operacion = st.selectbox("Seleccione ID de Movimiento", lista_ids)
-        
-        with col_acc:
-            st.write("") # Espaciador
-            c1, c2 = st.columns(2)
-            if c1.button("✅ Aprobar", type="primary", use_container_width=True):
-                supabase.table("movimientos").update({"estado": "Aprobado"}).eq("id_mov", id_operacion).execute()
-                st.success(f"Movimiento {id_operacion} aprobado.")
-                st.rerun()
-            if c2.button("❌ Rechazar", type="secondary", use_container_width=True):
-                supabase.table("movimientos").update({"estado": "Rechazado"}).eq("id_mov", id_operacion).execute()
-                st.warning(f"Movimiento {id_operacion} rechazado.")
-                st.rerun()
-    else:
-        st.info("No tienes movimientos pendientes de confirmación.")
-
-    st.divider()
-
-    # --- PARTE 2: HISTORIAL CON FILTROS ---
-    st.subheader("📜 Mi Historial de Movimientos")
-    
-    col_f1, col_f2 = st.columns(2)
-    import datetime # Asegúrate de tener este import arriba
-    fecha_default_desde = datetime.date.today() - datetime.timedelta(days=7)
-    
-    f_desde = col_f1.date_input("Fecha Desde", value=fecha_default_desde)
-    f_hasta = col_f2.date_input("Fecha Hasta", value=datetime.date.today())
-    
-    # Consulta con filtros de fecha_hora
-    # Convertimos las fechas a formato ISO para Postgres
-    historial_data = supabase.table("movimientos")\
-        .select("*")\
-        .eq("responsable", st.session_state["usuario"])\
-        .gte("fecha_hora", f_desde.isoformat())\
-        .lte("fecha_hora", f_hasta.isoformat() + "T23:59:59")\
+        .eq("estado", "Pendiente")\
         .order("fecha_hora", ascending=False).execute().data
     
-    if historial_data:
-        df_h = pd.DataFrame(historial_data)
+    if pendientes_data:
+        # Encabezado de "tabla" manual para que sea legible en móvil
+        st.markdown("---")
+        for item in pendientes_data:
+            # Creamos una fila con columnas: Info del insumo | Botón Verde | Botón Rojo
+            col_info, col_ok, col_ko = st.columns([3, 1, 1])
+            
+            with col_info:
+                st.write(f"**{item['insumo']}** ({item['cantidad']} ud)")
+                st.caption(f"ID: {item['id_mov']} | Sector: {item['sector']}")
+            
+            with col_ok:
+                # Botón pequeño verde (usamos el ID único de la fila de la DB)
+                if st.button("✅", key=f"ok_{item['id']}", help="Aprobar"):
+                    supabase.table("movimientos").update({"estado": "Aprobado"}).eq("id", item['id']).execute()
+                    st.toast(f"Aprobado: {item['insumo']}") # Notificación pequeña
+                    st.rerun()
+            
+            with col_ko:
+                # Botón pequeño rojo
+                if st.button("❌", key=f"ko_{item['id']}", help="Rechazar"):
+                    supabase.table("movimientos").update({"estado": "Rechazado"}).eq("id", item['id']).execute()
+                    st.toast(f"Rechazado: {item['insumo']}")
+                    st.rerun()
+            st.markdown("---")
+    else:
+        st.info("No tienes movimientos pendientes.")
+
+    # --- PARTE 2: HISTORIAL CORREGIDO ---
+    st.subheader("📜 Mi Historial")
+    
+    col_f1, col_f2 = st.columns(2)
+    import datetime
+    fecha_hoy = datetime.date.today()
+    f_desde = col_f1.date_input("Desde", value=fecha_hoy - datetime.timedelta(days=7))
+    f_hasta = col_f2.date_input("Hasta", value=fecha_hoy)
+    
+    # Filtro robusto: convertimos a string para comparar con la columna timestamptz de Postgres
+    hist_data = supabase.table("movimientos")\
+        .select("*")\
+        .eq("responsable", st.session_state["usuario"])\
+        .gte("fecha_hora", f_desde.strftime("%Y-%m-%d 00:00:00"))\
+        .lte("fecha_hora", f_hasta.strftime("%Y-%m-%d 23:59:59"))\
+        .order("fecha_hora", ascending=False).execute().data
+    
+    if hist_data:
+        df_h = pd.DataFrame(hist_data)
+        
+        # Formateamos la fecha para que sea más legible en la tabla
+        df_h['fecha_hora'] = pd.to_datetime(df_h['fecha_hora']).dt.strftime('%d/%m %H:%M')
         
         def color_estado(val):
-            if val == 'Aprobado': return 'background-color: #90ee90'
-            if val == 'Rechazado': return 'background-color: #ffcccb'
-            return 'background-color: #fffacd'
+            if val == 'Aprobado': return 'background-color: #d4edda; color: #155724'
+            if val == 'Rechazado': return 'background-color: #f8d7da; color: #721c24'
+            return 'background-color: #fff3cd; color: #856404'
         
-        # Mostramos el historial usando los nombres correctos
-        cols_hist = ["fecha_hora", "tipo", "insumo", "cantidad", "sector", "estado"]
-        st.dataframe(df_h[cols_hist].style.applymap(color_estado, subset=['estado']), 
-                     hide_index=True, use_container_width=True)
+        # Mostramos la tabla limpia
+        st.dataframe(
+            df_h[["fecha_hora", "tipo", "insumo", "cantidad", "estado"]].style.applymap(color_estado, subset=['estado']),
+            hide_index=True, use_container_width=True
+        )
     else:
-        st.write("No hay registros en el rango de fechas seleccionado.")
+        st.write("Sin registros en estas fechas.")
