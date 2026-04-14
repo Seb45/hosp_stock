@@ -338,47 +338,66 @@ elif st.session_state.rol == "Roperia":
         st.dataframe(df_mov, use_container_width=True)
 
 # ==========================================
-# ROL: PISO - CORRECCIÓN DE ERROR TÉCNICO
+# ROL: PISO
 # ==========================================
 if st.session_state["rol"] == "Piso":
     st.header(f"🏥 Panel de {st.session_state['usuario']}")
-    
     st.subheader("📋 Pendientes de Confirmación")
-    
-    # CONSULTA CORREGIDA PARA SUPABASE
+
     try:
         res_p = supabase.table("movimientos").select("*")\
             .eq("responsable", st.session_state["usuario"])\
             .eq("estado", "Pendiente")\
-            .order("fecha_hora", desc=True).execute() # <--- CAMBIO: desc=True en lugar de ascending
-        
+            .order("fecha_hora", desc=True).execute()
         pendientes_data = res_p.data
     except Exception as e:
         st.error(f"Error al consultar pendientes: {e}")
         pendientes_data = []
-    
+
     if pendientes_data:
-        st.write("Confirme o rechace cada insumo recibido:")
+        # Agrupar por id_mov
+        grupos = {}
         for item in pendientes_data:
+            id_mov = item["id_mov"]
+            if id_mov not in grupos:
+                grupos[id_mov] = {
+                    "id_mov": id_mov,
+                    "sector": item["sector"],
+                    "fecha_hora": item["fecha_hora"],
+                    "insumos": []
+                }
+            grupos[id_mov]["insumos"].append(f"{item['insumo']} x{item['cantidad']}")
+
+        st.write("Confirme o rechace cada pedido recibido:")
+
+        for id_mov, grupo in grupos.items():
             with st.container():
-                # Layout de 3 columnas para acción directa
                 col_info, col_ok, col_ko = st.columns([3, 0.5, 0.5])
-                
+
                 with col_info:
-                    st.markdown(f"**{item['insumo']}** — Cantidad: `{item['cantidad']}`")
-                    st.caption(f"Sector: {item['sector']} | ID: {item['id_mov']}")
-                
+                    insumos_str = " · ".join(grupo["insumos"])
+                    st.markdown(f"**📦 Pedido:** `{id_mov}`")
+                    st.markdown(f"{insumos_str}")
+                    st.caption(f"Sector: {grupo['sector']} | Fecha: {grupo['fecha_hora'][:16]}")
+
                 with col_ok:
-                    if st.button("✅", key=f"piso_ok_{item['id_mov']}", help="Aprobar"):
-                        supabase.table("movimientos").update({"estado": "Aprobado"}).eq("id_mov", item['id_mov']).execute()
-                        st.toast(f"✅ {item['insumo']} aprobado")
+                    if st.button("✅", key=f"piso_ok_{id_mov}", help="Aprobar todo el pedido"):
+                        supabase.table("movimientos")\
+                            .update({"estado": "Aprobado"})\
+                            .eq("id_mov", id_mov)\
+                            .execute()
+                        st.toast(f"✅ Pedido {id_mov} aprobado")
                         st.rerun()
-                
+
                 with col_ko:
-                    if st.button("❌", key=f"piso_ko_{item['id_mov']}", help="Rechazar"):
-                        supabase.table("movimientos").update({"estado": "Rechazado"}).eq("id_mov", item['id_mov']).execute()
-                        st.toast(f"❌ {item['insumo']} rechazado")
+                    if st.button("❌", key=f"piso_ko_{id_mov}", help="Rechazar todo el pedido"):
+                        supabase.table("movimientos")\
+                            .update({"estado": "Rechazado"})\
+                            .eq("id_mov", id_mov)\
+                            .execute()
+                        st.toast(f"❌ Pedido {id_mov} rechazado")
                         st.rerun()
+
             st.markdown("---")
     else:
         st.info("No tienes movimientos pendientes en este momento.")
