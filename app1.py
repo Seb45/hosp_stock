@@ -160,12 +160,7 @@ if st.session_state.usuario is None:
 
 
 # --- 6. APLICACIÓN PRINCIPAL (ROLES) ---
-st.sidebar.write(f"👤 **{st.session_state.usuario}**")
-st.sidebar.write(f"🏷️ Rol: **{st.session_state.rol}**")
-if st.sidebar.button("Cerrar Sesión"):
-    supabase.auth.sign_out()
-    st.session_state.clear()
-    st.rerun()
+
 # --- 7. APLICACIÓN PRINCIPAL (ROLES) ---
 st.sidebar.write(f"👤 **{st.session_state['usuario']}**")
 st.sidebar.write(f"🏷️ Rol: **{st.session_state['rol']}**")
