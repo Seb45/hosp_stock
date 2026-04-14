@@ -333,7 +333,7 @@ if st.session_state["rol"] == "Roperia":
                 st.rerun()
 
     with tab_reporte:
-        with tab_reporte:
+
         st.subheader("📊 Resumen Consolidado por Sector")
         st.caption("Este reporte solo contempla movimientos con confirmación del personal de Piso.")
         
