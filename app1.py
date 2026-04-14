@@ -383,7 +383,7 @@ if st.session_state["rol"] == "Piso":
                 with col_ok:
                     if st.button("✅", key=f"piso_ok_{id_mov}", help="Aprobar todo el pedido"):
                         supabase.table("movimientos")\
-                            .update({"estado": "Aprobado"})\
+                            .update({"estado": "Confirmado"})\
                             .eq("id_mov", id_mov)\
                             .execute()
                         st.toast(f"✅ Pedido {id_mov} aprobado")
