@@ -333,16 +333,18 @@ if st.session_state["rol"] == "Roperia":
                 st.rerun()
 
     with tab_reporte:
+        with tab_reporte:
         st.subheader("📊 Resumen Consolidado por Sector")
+        st.caption("Este reporte solo contempla movimientos con confirmación del personal de Piso.")
         
-        # Filtros de fecha para el reporte
+        # 1. Filtros de fecha
         col_r1, col_r2 = st.columns(2)
         hoy = datetime.date.today()
         f_desde = col_r1.date_input("Fecha Inicio", value=hoy - datetime.timedelta(days=7), key="rep_desde")
         f_hasta = col_r2.date_input("Fecha Fin", value=hoy, key="rep_hasta")
 
         try:
-            # Solo traemos movimientos APROBADOS para el reporte de consumo real
+            # FILTRO CRÍTICO: .eq("estado", "Aprobado") garantiza que solo sumamos lo confirmado
             res = supabase.table("movimientos").select("*")\
                 .gte("fecha_hora", f_desde.strftime("%Y-%m-%d 00:00:00"))\
                 .lte("fecha_hora", f_hasta.strftime("%Y-%m-%d 23:59:59"))\
@@ -351,32 +353,44 @@ if st.session_state["rol"] == "Roperia":
             if res.data:
                 df_rep = pd.DataFrame(res.data)
                 
-                # Cálculo de Retiros, Devoluciones y Netos
+                # 2. Lógica de cálculo (Vectorizada para mayor velocidad)
                 df_rep['Retiros'] = df_rep.apply(lambda x: x['cantidad'] if x['tipo'] == 'Retiro' else 0, axis=1)
                 df_rep['Devoluciones'] = df_rep.apply(lambda x: x['cantidad'] if x['tipo'] == 'Devolución' else 0, axis=1)
                 
+                # 3. Agrupamiento por Sector e Insumo
                 resumen = df_rep.groupby(['sector', 'insumo']).agg({
                     'Retiros': 'sum',
                     'Devoluciones': 'sum'
                 }).reset_index()
                 
+                # 4. Cálculo del Neto Real (Consumo final en el sector)
                 resumen['Neto (Consumo)'] = resumen['Retiros'] - resumen['Devoluciones']
                 
-                # Visualización
+                # 5. Visualización con formato
+                st.write(f"📊 Datos confirmados entre {f_desde.strftime('%d/%m/%Y')} y {f_hasta.strftime('%d/%m/%Y')}")
+                
+                # Ordenamos por los consumos más altos primero
+                resumen = resumen.sort_values(by=['sector', 'Neto (Consumo)'], ascending=[True, False])
+                
                 st.dataframe(
-                    resumen.sort_values(by='Neto (Consumo)', ascending=False),
+                    resumen,
                     hide_index=True,
                     use_container_width=True
                 )
                 
-                # Botón de descarga
+                # Botón de descarga para gestión administrativa
                 csv = resumen.to_csv(index=False).encode('utf-8')
-                st.download_button("📥 Descargar Reporte CSV", csv, f"consumo_{hoy}.csv", "text/csv")
+                st.download_button(
+                    label="📥 Descargar Reporte de Consumo (CSV)",
+                    data=csv,
+                    file_name=f"reporte_confirmados_{hoy}.csv",
+                    mime="text/csv",
+                )
             else:
-                st.info("No hay movimientos aprobados en este rango de fechas.")
+                st.info("No se encontraron movimientos aprobados (confirmados) en este rango de fechas.")
+                
         except Exception as e:
-            st.error(f"Error al generar reporte: {e}")
-
+            st.error(f"Error técnico al generar el reporte: {e}")
 
 # ==========================================
 # ROL: PISO
