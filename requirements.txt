@@ -1,4 +1,4 @@
 streamlit
 pandas
 qrcode[pil]
-st-gsheets-connection
+supabase
