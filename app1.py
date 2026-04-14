@@ -282,55 +282,55 @@ if st.session_state["rol"] == "Roperia":
 
     with tab_carga:
         st.subheader("Registro de Entregas y Devoluciones")
-                url_app_nube = "https://gestioninsumos.streamlit.app"
+        url_app_nube = "https://gestioninsumos.streamlit.app"
+
+        if 'num_rows' not in st.session_state: st.session_state.num_rows = 1
+        if 'last_qr' not in st.session_state: st.session_state.last_qr = None
+
+        tipo_op = st.radio("Operación", ["Retiro", "Devolución"], horizontal=True)
+        col_s, col_t = st.columns(2)
+        sector = col_s.selectbox("Sector", df_sec["nombre"].tolist())
+        turno = col_t.selectbox("Turno", ["Mañana", "Tarde", "Noche"])
         
-                if 'num_rows' not in st.session_state: st.session_state.num_rows = 1
-                if 'last_qr' not in st.session_state: st.session_state.last_qr = None
+        todos_insumos = df_ins["nombre"].tolist()
+        items_data = []
         
-                tipo_op = st.radio("Operación", ["Retiro", "Devolución"], horizontal=True)
-                col_s, col_t = st.columns(2)
-                sector = col_s.selectbox("Sector", df_sec["nombre"].tolist())
-                turno = col_t.selectbox("Turno", ["Mañana", "Tarde", "Noche"])
-                
-                todos_insumos = df_ins["nombre"].tolist()
-                items_data = []
-                
-                for i in range(st.session_state.num_rows):
-                    c1, c2 = st.columns([3, 1])
-                    key_insumo = f"i_{i}"
-                    key_cant = f"c_{i}"
-                    
-                    otros_seleccionados = [st.session_state[f"i_{j}"] for j in range(st.session_state.num_rows) if j != i and f"i_{j}" in st.session_state]
-                    opciones_disponibles = [ins for ins in todos_insumos if ins not in otros_seleccionados]
-                    
-                    if opciones_disponibles:
-                        ins = c1.selectbox(f"Insumo {i+1}", opciones_disponibles, key=key_insumo)
-                        cant = c2.number_input(f"Cant {i+1}", min_value=1, key=key_cant)
-                        items_data.append({"insumo": ins, "cantidad": cant})
-                    else:
-                        st.warning(f"Fila {i+1}: No hay más tipos de insumos.")
-                    
-                if st.session_state.num_rows < len(todos_insumos):
-                    if st.button("➕ Añadir Insumo"):
-                        st.session_state.num_rows += 1
-                        st.rerun()
-        
-                responsable = st.selectbox("Responsable (Piso)", df_usu[df_usu["rol"] == "Piso"]["nombre"].tolist())
-        
-                if st.button("🟩 Generar QR y Guardar", type="primary", use_container_width=True):
-                    nuevo_id = str(uuid.uuid4())[:8]
-                    nuevas_filas = [{"id_mov": nuevo_id, "tipo": tipo_op, "insumo": d["insumo"], "cantidad": d["cantidad"], "responsable": responsable, "sector": sector, "turno": turno, "usuario_carga": st.session_state.usuario} for d in items_data]
-                    supabase.table("movimientos").insert(nuevas_filas).execute()
-                    st.session_state.last_qr = nuevo_id
-                    st.success(f"Registrado. ID: {nuevo_id}")
-        
-                if st.session_state.last_qr:
-                    url_qr = f"{url_app_nube}/?confirmar_id={st.session_state.last_qr}"
-                    st.image(generar_qr(url_qr), width=250)
-                    if st.button("Nueva Carga"):
-                        st.session_state.num_rows = 1
-                        st.session_state.last_qr = None
-                        st.rerun()
+        for i in range(st.session_state.num_rows):
+            c1, c2 = st.columns([3, 1])
+            key_insumo = f"i_{i}"
+            key_cant = f"c_{i}"
+            
+            otros_seleccionados = [st.session_state[f"i_{j}"] for j in range(st.session_state.num_rows) if j != i and f"i_{j}" in st.session_state]
+            opciones_disponibles = [ins for ins in todos_insumos if ins not in otros_seleccionados]
+            
+            if opciones_disponibles:
+                ins = c1.selectbox(f"Insumo {i+1}", opciones_disponibles, key=key_insumo)
+                cant = c2.number_input(f"Cant {i+1}", min_value=1, key=key_cant)
+                items_data.append({"insumo": ins, "cantidad": cant})
+            else:
+                st.warning(f"Fila {i+1}: No hay más tipos de insumos.")
+            
+        if st.session_state.num_rows < len(todos_insumos):
+            if st.button("➕ Añadir Insumo"):
+                st.session_state.num_rows += 1
+                st.rerun()
+
+        responsable = st.selectbox("Responsable (Piso)", df_usu[df_usu["rol"] == "Piso"]["nombre"].tolist())
+
+        if st.button("🟩 Generar QR y Guardar", type="primary", use_container_width=True):
+            nuevo_id = str(uuid.uuid4())[:8]
+            nuevas_filas = [{"id_mov": nuevo_id, "tipo": tipo_op, "insumo": d["insumo"], "cantidad": d["cantidad"], "responsable": responsable, "sector": sector, "turno": turno, "usuario_carga": st.session_state.usuario} for d in items_data]
+            supabase.table("movimientos").insert(nuevas_filas).execute()
+            st.session_state.last_qr = nuevo_id
+            st.success(f"Registrado. ID: {nuevo_id}")
+
+        if st.session_state.last_qr:
+            url_qr = f"{url_app_nube}/?confirmar_id={st.session_state.last_qr}"
+            st.image(generar_qr(url_qr), width=250)
+            if st.button("Nueva Carga"):
+                st.session_state.num_rows = 1
+                st.session_state.last_qr = None
+                st.rerun()
 
     with tab_reporte:
         st.subheader("📊 Resumen Consolidado por Sector")
