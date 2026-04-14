@@ -348,7 +348,7 @@ if st.session_state["rol"] == "Roperia":
             res = supabase.table("movimientos").select("*")\
                 .gte("fecha_hora", f_desde.strftime("%Y-%m-%d 00:00:00"))\
                 .lte("fecha_hora", f_hasta.strftime("%Y-%m-%d 23:59:59"))\
-                .eq("estado", "Aprobado").execute()
+                .eq("estado", "Confirmado").execute()
             
             if res.data:
                 df_rep = pd.DataFrame(res.data)
