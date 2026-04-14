@@ -364,7 +364,7 @@ if st.session_state["rol"] == "Roperia":
                 }).reset_index()
                 
                 # 4. Cálculo del Neto Real (Consumo final en el sector)
-                resumen['Neto (Consumo)'] = resumen['Retiros'] - resumen['Devoluciones']
+                resumen['Neto (Consumo)'] = - resumen['Retiros'] + resumen['Devoluciones']
                 
                 # 5. Visualización con formato
                 st.write(f"📊 Datos confirmados entre {f_desde.strftime('%d/%m/%Y')} y {f_hasta.strftime('%d/%m/%Y')}")
