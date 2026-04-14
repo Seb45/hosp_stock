@@ -370,15 +370,15 @@ if st.session_state["rol"] == "Piso":
                 
                 with col_ok:
                     # Botón de Aprobación
-                    if st.button("✅", key=f"ok_check_{item['id']}", help="Aprobar"):
-                        supabase.table("movimientos").update({"estado": "Aprobado"}).eq("id", item['id']).execute()
+                    if st.button("✅", key=f"ok_check_{item['id_mov']}", help="Aprobar"):
+                        supabase.table("movimientos").update({"estado": "Aprobado"}).eq("id_mov", item['id_mov']).execute()
                         st.toast(f"✅ {item['insumo']} aprobado")
                         st.rerun()
                 
                 with col_ko:
                     # Botón de Rechazo
-                    if st.button("❌", key=f"ko_check_{item['id']}", help="Rechazar"):
-                        supabase.table("movimientos").update({"estado": "Rechazado"}).eq("id", item['id']).execute()
+                    if st.button("❌", key=f"ko_check_{item['id_mov']}", help="Rechazar"):
+                        supabase.table("movimientos").update({"estado": "Rechazado"}).eq("id_mov", item['id_mov']).execute()
                         st.toast(f"❌ {item['insumo']} rechazado")
                         st.rerun()
             st.markdown("---")
