@@ -341,14 +341,11 @@ elif st.session_state.rol == "Roperia":
 # ROL: PISO (ENFERMERÍA / MÉDICOS)
 # ==========================================
 if st.session_state["rol"] == "Piso":
-    import datetime # Importación local segura
-    
     st.header(f"🏥 Panel de {st.session_state['usuario']}")
     
     # --- PARTE 1: ACCIONES INMEDIATAS ---
     st.subheader("📋 Pendientes de Confirmación")
     
-    # Traemos los datos directamente de la tabla
     res_p = supabase.table("movimientos").select("*")\
         .eq("responsable", st.session_state["usuario"])\
         .eq("estado", "Pendiente")\
@@ -358,77 +355,56 @@ if st.session_state["rol"] == "Piso":
     
     if pendientes_data:
         st.write("Confirme o rechace cada insumo recibido:")
-        st.markdown("---")
         for item in pendientes_data:
-            # Layout de 3 columnas: [Detalle] [Botón OK] [Botón KO]
-            # Ajustamos el ancho para que los botones queden juntos a la derecha
-            col_info, col_ok, col_ko = st.columns([3, 0.5, 0.5])
-            
-            with col_info:
-                st.markdown(f"**{item['insumo']}** — Cantidad: `{item['cantidad']}`")
-                st.caption(f"Sector: {item['sector']} | ID: {item['id_mov']}")
-            
-            with col_ok:
-                # Botón Verde de un solo clic
-                if st.button("✅", key=f"ok_idx_{item['id']}", help="Aprobar"):
-                    supabase.table("movimientos").update({"estado": "Aprobado"}).eq("id", item['id']).execute()
-                    st.toast(f"✅ {item['insumo']} aprobado")
-                    st.rerun()
-            
-            with col_ko:
-                # Botón Rojo de un solo clic
-                if st.button("❌", key=f"ko_idx_{item['id']}", help="Rechazar"):
-                    supabase.table("movimientos").update({"estado": "Rechazado"}).eq("id", item['id']).execute()
-                    st.toast(f"❌ {item['insumo']} rechazado")
-                    st.rerun()
+            with st.container():
+                col_info, col_ok, col_ko = st.columns([3, 0.5, 0.5])
+                with col_info:
+                    st.markdown(f"**{item['insumo']}** — Cantidad: `{item['cantidad']}`")
+                    st.caption(f"Sector: {item['sector']} | ID: {item['id_mov']}")
+                with col_ok:
+                    if st.button("✅", key=f"ok_{item['id']}"):
+                        supabase.table("movimientos").update({"estado": "Aprobado"}).eq("id", item['id']).execute()
+                        st.toast(f"✅ {item['insumo']} aprobado")
+                        st.rerun()
+                with col_ko:
+                    if st.button("❌", key=f"ko_{item['id']}"):
+                        supabase.table("movimientos").update({"estado": "Rechazado"}).eq("id", item['id']).execute()
+                        st.toast(f"❌ {item['insumo']} rechazado")
+                        st.rerun()
             st.markdown("---")
     else:
-        st.info("No tienes movimientos pendientes en este momento.")
+        st.info("No tienes movimientos pendientes.")
 
-# --- PARTE 2: HISTORIAL CON FILTRO DE FECHAS ---
+    # --- PARTE 2: HISTORIAL CORREGIDO ---
     st.divider()
-    st.subheader("📜 Mi Historial de Movimientos")
+    st.subheader("📜 Mi Historial")
     
     col_f1, col_f2 = st.columns(2)
-    # Usamos datetime.date directamente para evitar conflictos de importación
+    # Aquí usamos datetime directamente habiéndolo importado arriba del todo
     hoy = datetime.date.today()
-    f_desde = col_f1.date_input("Fecha Desde", value=hoy - datetime.timedelta(days=7))
-    f_hasta = col_f2.date_input("Fecha Hasta", value=hoy)
+    f_desde = col_f1.date_input("Desde", value=hoy - datetime.timedelta(days=7))
+    f_hasta = col_f2.date_input("Hasta", value=hoy)
     
-    # Consulta al historial
     res_h = supabase.table("movimientos").select("*")\
         .eq("responsable", st.session_state["usuario"])\
         .gte("fecha_hora", f_desde.strftime("%Y-%m-%d 00:00:00"))\
         .lte("fecha_hora", f_hasta.strftime("%Y-%m-%d 23:59:59"))\
         .order("fecha_hora", ascending=False).execute()
     
-    historial = res_h.data
-    
-    if historial:
-        df_h = pd.DataFrame(historial)
+    if res_h.data:
+        df_h = pd.DataFrame(res_h.data)
         
-        # Verificamos que las columnas necesarias existan antes de operar
-        columnas_necesarias = ["fecha_hora", "tipo", "insumo", "cantidad", "estado"]
-        if all(col in df_h.columns for col in columnas_necesarias):
-            
-            # Formateamos la fecha
+        # Formateo y Estilo
+        if 'estado' in df_h.columns:
             df_h['Fecha/Hora'] = pd.to_datetime(df_h['fecha_hora']).dt.strftime('%d/%m/%y %H:%M')
             
-            # Estilo visual seguro
             def color_estado(val):
                 if val == 'Aprobado': return 'background-color: #d4edda; color: #155724'
                 if val == 'Rechazado': return 'background-color: #f8d7da; color: #721c24'
                 return 'background-color: #fff3cd; color: #856404'
             
-            # Seleccionamos y mostramos solo si tenemos datos
-            df_mostrar = df_h[["Fecha/Hora", "tipo", "insumo", "cantidad", "estado"]].copy()
-            
-            st.dataframe(
-                df_mostrar.style.applymap(color_estado, subset=['estado']),
-                hide_index=True, 
-                use_container_width=True
-            )
-        else:
-            st.warning("El historial contiene datos incompletos en la base de datos.")
+            df_mostrar = df_h[["Fecha/Hora", "tipo", "insumo", "cantidad", "estado"]]
+            st.dataframe(df_mostrar.style.applymap(color_estado, subset=['estado']), 
+                         hide_index=True, use_container_width=True)
     else:
-        st.write("No se encontraron registros para el período seleccionado.")
+        st.write("Sin registros en este rango.")
