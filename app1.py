@@ -403,56 +403,56 @@ if st.session_state["rol"] == "Piso":
         st.info("No tienes movimientos pendientes en este momento.")
 
 st.markdown("---")
-        st.subheader("📜 Historial de Movimientos")
+st.subheader("📜 Historial de Movimientos")
 
-        col_desde, col_hasta = st.columns(2)
-        with col_desde:
-            fecha_desde = st.date_input(
-                "Desde",
-                value=datetime.now().date() - timedelta(days=7),
-                key="hist_desde"
-            )
-        with col_hasta:
-            fecha_hasta = st.date_input(
-                "Hasta",
-                value=datetime.now().date(),
-                key="hist_hasta"
-            )
+col_desde, col_hasta = st.columns(2)
+with col_desde:
+    fecha_desde = st.date_input(
+        "Desde",
+        value=datetime.now().date() - timedelta(days=7),
+        key="hist_desde"
+    )
+with col_hasta:
+    fecha_hasta = st.date_input(
+        "Hasta",
+        value=datetime.now().date(),
+        key="hist_hasta"
+    )
 
-        try:
-            res_h = supabase.table("movimientos").select("*")\
-                .eq("responsable", st.session_state["usuario"])\
-                .gte("fecha_hora", fecha_desde.isoformat())\
-                .lte("fecha_hora", (fecha_hasta + timedelta(days=1)).isoformat())\
-                .order("fecha_hora", desc=True)\
-                .execute()
-            historial_data = res_h.data
-        except Exception as e:
-            st.error(f"Error al consultar historial: {e}")
-            historial_data = []
+try:
+    res_h = supabase.table("movimientos").select("*")\
+        .eq("responsable", st.session_state["usuario"])\
+        .gte("fecha_hora", fecha_desde.isoformat())\
+        .lte("fecha_hora", (fecha_hasta + timedelta(days=1)).isoformat())\
+        .order("fecha_hora", desc=True)\
+        .execute()
+    historial_data = res_h.data
+except Exception as e:
+    st.error(f"Error al consultar historial: {e}")
+    historial_data = []
 
-        if historial_data:
-            # Agrupar por id_mov igual que en pendientes
-            hist_grupos = {}
-            for item in historial_data:
-                id_mov = item["id_mov"]
-                if id_mov not in hist_grupos:
-                    hist_grupos[id_mov] = {
-                        "id_mov": id_mov,
-                        "sector": item["sector"],
-                        "fecha_hora": item["fecha_hora"],
-                        "estado": item["estado"],
-                        "insumos": []
-                    }
-                hist_grupos[id_mov]["insumos"].append(f"{item['insumo']} x{item['cantidad']}")
+if historial_data:
+    # Agrupar por id_mov igual que en pendientes
+    hist_grupos = {}
+    for item in historial_data:
+        id_mov = item["id_mov"]
+        if id_mov not in hist_grupos:
+            hist_grupos[id_mov] = {
+                "id_mov": id_mov,
+                "sector": item["sector"],
+                "fecha_hora": item["fecha_hora"],
+                "estado": item["estado"],
+                "insumos": []
+            }
+        hist_grupos[id_mov]["insumos"].append(f"{item['insumo']} x{item['cantidad']}")
 
-            for id_mov, grupo in hist_grupos.items():
-                estado = grupo["estado"]
-                icono = "✅" if estado == "Aprobado" else "❌" if estado == "Rechazado" else "⏳"
-                with st.container():
-                    st.markdown(f"{icono} **Pedido:** `{id_mov}` — **{estado}**")
-                    st.markdown(" · ".join(grupo["insumos"]))
-                    st.caption(f"Sector: {grupo['sector']} | Fecha: {grupo['fecha_hora'][:16]}")
-                st.markdown("---")
-        else:
-            st.info("No hay movimientos en el período seleccionado.")
+    for id_mov, grupo in hist_grupos.items():
+        estado = grupo["estado"]
+        icono = "✅" if estado == "Aprobado" else "❌" if estado == "Rechazado" else "⏳"
+        with st.container():
+            st.markdown(f"{icono} **Pedido:** `{id_mov}` — **{estado}**")
+            st.markdown(" · ".join(grupo["insumos"]))
+            st.caption(f"Sector: {grupo['sector']} | Fecha: {grupo['fecha_hora'][:16]}")
+        st.markdown("---")
+else:
+    st.info("No hay movimientos en el período seleccionado.")
