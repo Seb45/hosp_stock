@@ -178,11 +178,19 @@ if st.session_state.rol == "Admin":
     tab_usu, tab_ins, tab_sec = st.tabs(["👤 Usuarios", "📦 Insumos", "🏥 Sectores"])
 
     with tab_usu:
-        st.dataframe(df_usu[["nombre", "rol", "pin"]], hide_index=True, use_container_width=True)
-        col1, col2 = st.columns(2)
+        # Agregamos la columna 'email' para que puedas auditar los correos capturados
+        columnas_visibles = ["nombre", "rol", "pin"]
+        if "email" in df_usu.columns:
+            columnas_visibles.append("email")
+            
+        st.dataframe(df_usu[columnas_visibles], hide_index=True, use_container_width=True)
+        
+        # Dividimos en 3 columnas para el ABM completo
+        col1, col2, col3 = st.columns(3)
+        
         with col1:
             with st.form("form_add_usu", clear_on_submit=True):
-                st.subheader("➕ Alta Manual (Con PIN)")
+                st.subheader("➕ Alta Manual")
                 n_nom = st.text_input("Nombre y Apellido")
                 n_rol = st.selectbox("Rol", ["Piso", "Roperia", "Admin"])
                 n_pin = st.text_input("Asignar PIN numérico")
@@ -192,6 +200,7 @@ if st.session_state.rol == "Admin":
                         cargar_catalogos.clear()
                         st.success("Usuario creado.")
                         st.rerun()
+                        
         with col2:
             with st.form("form_update_rol"):
                 st.subheader("🔄 Modificar Rol")
@@ -202,7 +211,22 @@ if st.session_state.rol == "Admin":
                     cargar_catalogos.clear()
                     st.success("Actualizado.")
                     st.rerun()
-
+                    
+        with col3:
+            with st.form("form_del_usu"):
+                st.subheader("🗑️ Eliminar")
+                u_del = st.selectbox("Usuario a eliminar", df_usu["nombre"].tolist())
+                if st.form_submit_button("Eliminar Permanente"):
+                    # Regla de Seguridad: Evitar auto-eliminación
+                    if u_del == st.session_state["usuario"]:
+                        st.error("No puedes eliminar tu propia cuenta activa.")
+                    else:
+                        # 1. (Opcional pero recomendado) Borrar primero de Supabase Auth si es usuario Google
+                        # Nota: Esto borra de la tabla pública. Para borrar el acceso real de Google, 
+                        # se hace desde la consola de Supabase > Authentication por seguridad extrema.
+                        supabase.table("usuarios").delete().eq("nombre", u_del).execute()
+                        cargar_catalogos.clear()
+                        st.rerun()
     with tab_ins:
         st.dataframe(df_ins[["id", "nombre"]], hide_index=True, use_container_width=True)
         col1, col2 = st.columns(2)
