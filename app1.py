@@ -1,32 +1,36 @@
 import streamlit as st
-from streamlit_gsheets import GSheetsConnection
 import pandas as pd
 import uuid
 import qrcode
 from io import BytesIO
 from datetime import datetime
+from supabase import create_client, Client
 
 st.set_page_config(page_title="Control Hotelería", layout="wide")
 
-# --- 1. CONEXIÓN A GOOGLE SHEETS ---
-# En la nube, Streamlit buscará la URL en los "Secrets"
-conn = st.connection("gsheets", type=GSheetsConnection)
+# --- 1. CONEXIÓN A SUPABASE (POSTGRESQL) ---
+@st.cache_resource
+def init_connection():
+    url = st.secrets["SUPABASE_URL"]
+    key = st.secrets["SUPABASE_KEY"]
+    return create_client(url, key)
 
-def cargar_datos():
-    # Lecturas con memoria caché
-    df_mov = conn.read(worksheet="movimientos", ttl=5)
-    df_usu = conn.read(worksheet="usuarios", ttl=600)
-    df_ins = conn.read(worksheet="insumos", ttl=600)
-    df_sec = conn.read(worksheet="sectores", ttl=600)
+supabase: Client = init_connection()
 
-    # NUEVO: Limpiador automático de espacios invisibles en las columnas
-    df_mov.columns = df_mov.columns.str.strip()
-    df_usu.columns = df_usu.columns.str.strip()
-    df_ins.columns = df_ins.columns.str.strip()
-    df_sec.columns = df_sec.columns.str.strip()
+# --- 2. CARGA DE DATOS ---
+@st.cache_data(ttl=600) # Memoria caché por 10 minutos para catálogos
+def cargar_catalogos():
+    usu = pd.DataFrame(supabase.table("usuarios").select("*").execute().data)
+    ins = pd.DataFrame(supabase.table("insumos").select("*").execute().data)
+    sec = pd.DataFrame(supabase.table("sectores").select("*").execute().data)
+    return usu, ins, sec
 
-    return df_mov, df_usu, df_ins, df_sec
-
+def cargar_movimientos():
+    # Los movimientos se traen en tiempo real sin caché
+    data = supabase.table("movimientos").select("*").order("fecha_hora", desc=True).execute().data
+    if not data:
+        return pd.DataFrame(columns=["id_mov", "fecha_hora", "tipo", "insumo", "cantidad", "responsable", "sector", "turno", "estado", "usuario_carga"])
+    return pd.DataFrame(data)
 
 def generar_qr(url):
     qr = qrcode.make(url)
@@ -34,71 +38,69 @@ def generar_qr(url):
     qr.save(buffer, format="PNG")
     return buffer.getvalue()
 
-# Carga inicial
-df_mov, df_usu, df_ins, df_sec = cargar_datos()
+df_usu, df_ins, df_sec = cargar_catalogos()
+df_mov = cargar_movimientos()
 
-# --- 2. LÓGICA DE VALIDACIÓN POR QR ---
+# --- 3. LÓGICA DE VALIDACIÓN POR QR ---
 params = st.query_params
 if "confirmar_id" in params:
     id_a_confirmar = params["confirmar_id"]
     st.title("📱 Validación de Recepción")
     
-    # Filtrar el movimiento en el DataFrame de la nube
-    movimientos_pendientes = df_mov[df_mov['ID_Mov'].astype(str) == str(id_a_confirmar)]
+    movimientos_pendientes = df_mov[df_mov['id_mov'].astype(str) == str(id_a_confirmar)]
     
     if not movimientos_pendientes.empty:
-        if movimientos_pendientes.iloc[0]["Estado"] == "Confirmado":
+        if movimientos_pendientes.iloc[0]["estado"] == "Confirmado":
             st.success("✅ Esta transacción ya fue confirmada.")
         else:
-            st.info(f"**Sector:** {movimientos_pendientes.iloc[0]['Sector']}")
+            st.info(f"**Sector:** {movimientos_pendientes.iloc[0]['sector']}")
             st.write("**Detalle de insumos:**")
-            st.dataframe(movimientos_pendientes[['Cantidad', 'Insumo']], hide_index=True)
+            
+            # Mostrar tabla limpia
+            columnas_tecnicas = ["id", "id_mov", "estado", "usuario_carga", "responsable", "sector", "turno", "fecha_hora"]
+            df_mostrar = movimientos_pendientes.drop(columns=columnas_tecnicas, errors="ignore")
+            st.dataframe(df_mostrar, hide_index=True)
             
             pin_ingresado = st.text_input("Ingrese su PIN para firmar:", type="password")
             if st.button("Firmar y Confirmar", type="primary"):
-                responsable = movimientos_pendientes.iloc[0]['Responsable']
-                usuario_data = df_usu[df_usu["Nombre"] == responsable]
+                responsable = movimientos_pendientes.iloc[0]['responsable']
+                usuario_data = df_usu[df_usu["nombre"] == responsable]
                 
                 if usuario_data.empty:
-                    st.error(f"Error: El usuario '{responsable}' fue eliminado de la base de datos.")
+                    st.error("Error: El usuario fue eliminado.")
                 else:
-                    # Forzamos que el PIN real sea texto limpio sin decimales ni espacios
-                    pin_real = str(usuario_data["PIN"].values[0]).replace('.0', '').strip()
+                    pin_real = str(usuario_data["pin"].values[0]).strip()
                     
                     if pin_ingresado.strip() == pin_real:
-                        # Actualizar en la nube
-                        df_mov.loc[df_mov['ID_Mov'].astype(str) == str(id_a_confirmar), "Estado"] = "Confirmado"
-                        conn.update(worksheet="movimientos", data=df_mov)
-                        st.success("✅ Firma registrada en la base de datos.")
+                        # ACTUALIZACIÓN EN BASE DE DATOS REAL (Concurrencia Segura)
+                        supabase.table("movimientos").update({"estado": "Confirmado"}).eq("id_mov", id_a_confirmar).execute()
+                        st.success("✅ Firma digital registrada con éxito.")
                         st.balloons()
                     else:
                         st.error("PIN incorrecto.")
     else:
-        st.error("Transacción no encontrada.")
+        st.error("Transacción no encontrada o código expirado.")
     st.stop()
 
-# --- 3. SISTEMA DE LOGIN ---
-# --- 3. SISTEMA DE LOGIN ---
+# --- 4. SISTEMA DE LOGIN ---
 if 'usuario' not in st.session_state:
     st.session_state.update({'usuario': None, 'rol': None})
 
 if st.session_state.usuario is None:
     st.title("🔐 Acceso")
     with st.form("login"):
-        user = st.selectbox("Usuario", df_usu["Nombre"].tolist())
+        user = st.selectbox("Usuario", df_usu["nombre"].tolist())
         pin = st.text_input("PIN", type="password")
         if st.form_submit_button("Ingresar"):
-            # Creamos una columna temporal con los PINs totalmente limpios (sin .0 ni espacios)
-            df_usu["PIN_Limpio"] = df_usu["PIN"].astype(str).str.replace('.0', '', regex=False).str.strip()
-            
-            data = df_usu[(df_usu["Nombre"] == user) & (df_usu["PIN_Limpio"] == pin.strip())]
+            data = df_usu[(df_usu["nombre"] == user) & (df_usu["pin"].astype(str) == pin.strip())]
             if not data.empty:
-                st.session_state.update({'usuario': user, 'rol': data["Rol"].values[0]})
+                st.session_state.update({'usuario': user, 'rol': data["rol"].values[0]})
                 st.rerun()
             else:
                 st.error("Credenciales incorrectas")
     st.stop()
-# --- 4. APLICACIÓN PRINCIPAL (ROLES) ---
+
+# --- 5. APLICACIÓN PRINCIPAL (ROLES) ---
 st.sidebar.write(f"👤 **{st.session_state.usuario}**")
 if st.sidebar.button("Cerrar Sesión"):
     st.session_state.clear()
@@ -116,39 +118,41 @@ if st.session_state.rol == "Roperia":
 
         tipo_op = st.radio("Operación", ["Retiro", "Devolución"], horizontal=True)
         col_s, col_t = st.columns(2)
-        sector = col_s.selectbox("Sector", df_sec["Nombre"].tolist())
+        sector = col_s.selectbox("Sector", df_sec["nombre"].tolist())
         turno = col_t.selectbox("Turno", ["Mañana", "Tarde", "Noche"])
         
         items_data = []
         for i in range(st.session_state.num_rows):
             c1, c2 = st.columns([3, 1])
-            ins = c1.selectbox(f"Insumo {i+1}", df_ins["Nombre"].tolist(), key=f"i_{i}")
+            ins = c1.selectbox(f"Insumo {i+1}", df_ins["nombre"].tolist(), key=f"i_{i}")
             cant = c2.number_input(f"Cant {i+1}", min_value=1, key=f"c_{i}")
-            items_data.append({"Insumo": ins, "Cantidad": cant})
+            items_data.append({"insumo": ins, "cantidad": cant})
             
         if st.button("➕ Añadir Insumo"):
             st.session_state.num_rows += 1
             st.rerun()
 
-        responsable = st.selectbox("Responsable (Piso)", df_usu[df_usu["Rol"] == "Piso"]["Nombre"].tolist())
+        responsable = st.selectbox("Responsable (Piso)", df_usu[df_usu["rol"] == "Piso"]["nombre"].tolist())
 
         if st.button("🟩 Generar QR y Guardar", type="primary", use_container_width=True):
             nuevo_id = str(uuid.uuid4())[:8]
-            fecha = datetime.now().strftime("%Y-%m-%d %H:%M")
             
-            # Crear los nuevos registros
+            # Preparar paquete de datos para Postgres
             nuevas_filas = []
             for d in items_data:
                 nuevas_filas.append({
-                    "ID_Mov": nuevo_id, "Fecha_Hora": fecha, "Tipo": tipo_op,
-                    "Insumo": d["Insumo"], "Cantidad": d["Cantidad"],
-                    "Responsable": responsable, "Sector": sector, "Turno": turno,
-                    "Estado": "Pendiente", "Usuario_Carga": st.session_state.usuario
+                    "id_mov": nuevo_id, 
+                    "tipo": tipo_op,
+                    "insumo": d["insumo"], 
+                    "cantidad": d["cantidad"],
+                    "responsable": responsable, 
+                    "sector": sector, 
+                    "turno": turno,
+                    "usuario_carga": st.session_state.usuario
                 })
             
-            # Actualizar la nube: Concatenamos y subimos
-            df_final = pd.concat([df_mov, pd.DataFrame(nuevas_filas)], ignore_index=True)
-            conn.update(worksheet="movimientos", data=df_final)
+            # INSERCIÓN MASIVA EN BASE DE DATOS (A prueba de balas)
+            supabase.table("movimientos").insert(nuevas_filas).execute()
             
             st.session_state.last_qr = nuevo_id
             st.success(f"Registrado. ID: {nuevo_id}")
@@ -162,5 +166,13 @@ if st.session_state.rol == "Roperia":
                 st.rerun()
 
     elif menu == "Auditoría":
-        st.header("📊 Historial de la Nube")
+        st.header("📊 Auditoría en Tiempo Real")
         st.dataframe(df_mov, use_container_width=True)
+
+elif st.session_state.rol == "Piso":
+    st.header("🛎️ Mis Tareas Pendientes")
+    pendientes = df_mov[(df_mov["responsable"] == st.session_state.usuario) & (df_mov["estado"] == "Pendiente")]
+    if pendientes.empty:
+        st.success("Todo al día.")
+    else:
+        st.dataframe(pendientes[["id_mov", "fecha_hora", "tipo", "cantidad", "insumo"]])
