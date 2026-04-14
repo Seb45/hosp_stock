@@ -282,57 +282,55 @@ if st.session_state["rol"] == "Roperia":
 
     with tab_carga:
         st.subheader("Registro de Entregas y Devoluciones")
+                url_app_nube = "https://gestioninsumos.streamlit.app"
         
-        # 1. Generador de ID de Movimiento (para agrupar varios insumos en un solo pedido)
-        if "current_id_mov" not in st.session_state:
-            st.session_state["current_id_mov"] = str(uuid.uuid4())[:8].upper()
+                if 'num_rows' not in st.session_state: st.session_state.num_rows = 1
+                if 'last_qr' not in st.session_state: st.session_state.last_qr = None
         
-        col_id1, col_id2 = st.columns([3, 1])
-        with col_id1:
-            id_mov_act = st.text_input("ID de Pedido (Agrupador)", value=st.session_state["current_id_mov"])
-        with col_id2:
-            st.write("") # Espaciador
-            if st.button("Nuevo ID"):
-                st.session_state["current_id_mov"] = str(uuid.uuid4())[:8].upper()
-                st.rerun()
-
-        st.markdown("---")
-
-        # 2. Formulario de Carga
-        with st.form("form_movimiento", clear_on_submit=True):
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                insumo_sel = st.selectbox("Insumo", df_ins["nombre"].tolist())
-                cantidad_sel = st.number_input("Cantidad", min_value=1, step=1, value=1)
-                tipo_sel = st.selectbox("Operación", ["Retiro", "Devolución"])
-            
-            with col2:
-                # El responsable es quien luego verá esto en su panel de 'Piso'
-                responsable_sel = st.selectbox("Responsable (Quién recibe/entrega)", df_usu[df_usu["rol"]=="Piso"]["nombre"].tolist())
-                sector_sel = st.selectbox("Sector", df_sec["nombre"].tolist())
-            
-            submit = st.form_submit_button("Registrar Movimiento", type="primary", use_container_width=True)
-            
-            if submit:
-                nuevo_mov = {
-                    "id_mov": id_mov_act,
-                    "insumo": insumo_sel,
-                    "cantidad": cantidad_sel,
-                    "tipo": tipo_sel,
-                    "responsable": responsable_sel,
-                    "sector": sector_sel,
-                    "usuario": st.session_state["usuario"], # Quién lo carga (Ropería)
-                    "estado": "Pendiente", # Clave para que aparezca en el panel de Piso
-                    "fecha_hora": datetime.datetime.now().isoformat()
-                }
+                tipo_op = st.radio("Operación", ["Retiro", "Devolución"], horizontal=True)
+                col_s, col_t = st.columns(2)
+                sector = col_s.selectbox("Sector", df_sec["nombre"].tolist())
+                turno = col_t.selectbox("Turno", ["Mañana", "Tarde", "Noche"])
                 
-                try:
-                    supabase.table("movimientos").insert(nuevo_mov).execute()
-                    st.success(f"Registrado: {insumo_sel} x{cantidad_sel} para {responsable_sel}")
-                    st.toast("Movimiento guardado en la base de datos")
-                except Exception as e:
-                    st.error(f"Error al guardar: {e}")
+                todos_insumos = df_ins["nombre"].tolist()
+                items_data = []
+                
+                for i in range(st.session_state.num_rows):
+                    c1, c2 = st.columns([3, 1])
+                    key_insumo = f"i_{i}"
+                    key_cant = f"c_{i}"
+                    
+                    otros_seleccionados = [st.session_state[f"i_{j}"] for j in range(st.session_state.num_rows) if j != i and f"i_{j}" in st.session_state]
+                    opciones_disponibles = [ins for ins in todos_insumos if ins not in otros_seleccionados]
+                    
+                    if opciones_disponibles:
+                        ins = c1.selectbox(f"Insumo {i+1}", opciones_disponibles, key=key_insumo)
+                        cant = c2.number_input(f"Cant {i+1}", min_value=1, key=key_cant)
+                        items_data.append({"insumo": ins, "cantidad": cant})
+                    else:
+                        st.warning(f"Fila {i+1}: No hay más tipos de insumos.")
+                    
+                if st.session_state.num_rows < len(todos_insumos):
+                    if st.button("➕ Añadir Insumo"):
+                        st.session_state.num_rows += 1
+                        st.rerun()
+        
+                responsable = st.selectbox("Responsable (Piso)", df_usu[df_usu["rol"] == "Piso"]["nombre"].tolist())
+        
+                if st.button("🟩 Generar QR y Guardar", type="primary", use_container_width=True):
+                    nuevo_id = str(uuid.uuid4())[:8]
+                    nuevas_filas = [{"id_mov": nuevo_id, "tipo": tipo_op, "insumo": d["insumo"], "cantidad": d["cantidad"], "responsable": responsable, "sector": sector, "turno": turno, "usuario_carga": st.session_state.usuario} for d in items_data]
+                    supabase.table("movimientos").insert(nuevas_filas).execute()
+                    st.session_state.last_qr = nuevo_id
+                    st.success(f"Registrado. ID: {nuevo_id}")
+        
+                if st.session_state.last_qr:
+                    url_qr = f"{url_app_nube}/?confirmar_id={st.session_state.last_qr}"
+                    st.image(generar_qr(url_qr), width=250)
+                    if st.button("Nueva Carga"):
+                        st.session_state.num_rows = 1
+                        st.session_state.last_qr = None
+                        st.rerun()
 
     with tab_reporte:
         st.subheader("📊 Resumen Consolidado por Sector")
