@@ -384,16 +384,17 @@ if st.session_state["rol"] == "Piso":
     else:
         st.info("No tienes movimientos pendientes en este momento.")
 
-    # --- PARTE 2: HISTORIAL CON FILTRO DE FECHAS ---
+# --- PARTE 2: HISTORIAL CON FILTRO DE FECHAS ---
     st.divider()
     st.subheader("📜 Mi Historial de Movimientos")
     
     col_f1, col_f2 = st.columns(2)
+    # Usamos datetime.date directamente para evitar conflictos de importación
     hoy = datetime.date.today()
     f_desde = col_f1.date_input("Fecha Desde", value=hoy - datetime.timedelta(days=7))
     f_hasta = col_f2.date_input("Fecha Hasta", value=hoy)
     
-    # Consulta al historial con fechas formateadas como string ISO
+    # Consulta al historial
     res_h = supabase.table("movimientos").select("*")\
         .eq("responsable", st.session_state["usuario"])\
         .gte("fecha_hora", f_desde.strftime("%Y-%m-%d 00:00:00"))\
@@ -405,21 +406,28 @@ if st.session_state["rol"] == "Piso":
     if historial:
         df_h = pd.DataFrame(historial)
         
-        # Formateamos la fecha para que sea más amigable en la tabla
-        df_h['Fecha/Hora'] = pd.to_datetime(df_h['fecha_hora']).dt.strftime('%d/%m/%y %H:%M')
-        
-        # Estilo visual para los estados
-        def color_estado(val):
-            if val == 'Aprobado': return 'background-color: #d4edda; color: #155724'
-            if val == 'Rechazado': return 'background-color: #f8d7da; color: #721c24'
-            return 'background-color: #fff3cd; color: #856404'
-        
-        # Seleccionamos y mostramos
-        df_mostrar = df_h[["Fecha/Hora", "tipo", "insumo", "cantidad", "estado"]].copy()
-        st.dataframe(
-            df_mostrar.style.applymap(color_estado, subset=['estado']),
-            hide_index=True, 
-            use_container_width=True
-        )
+        # Verificamos que las columnas necesarias existan antes de operar
+        columnas_necesarias = ["fecha_hora", "tipo", "insumo", "cantidad", "estado"]
+        if all(col in df_h.columns for col in columnas_necesarias):
+            
+            # Formateamos la fecha
+            df_h['Fecha/Hora'] = pd.to_datetime(df_h['fecha_hora']).dt.strftime('%d/%m/%y %H:%M')
+            
+            # Estilo visual seguro
+            def color_estado(val):
+                if val == 'Aprobado': return 'background-color: #d4edda; color: #155724'
+                if val == 'Rechazado': return 'background-color: #f8d7da; color: #721c24'
+                return 'background-color: #fff3cd; color: #856404'
+            
+            # Seleccionamos y mostramos solo si tenemos datos
+            df_mostrar = df_h[["Fecha/Hora", "tipo", "insumo", "cantidad", "estado"]].copy()
+            
+            st.dataframe(
+                df_mostrar.style.applymap(color_estado, subset=['estado']),
+                hide_index=True, 
+                use_container_width=True
+            )
+        else:
+            st.warning("El historial contiene datos incompletos en la base de datos.")
     else:
         st.write("No se encontraron registros para el período seleccionado.")
