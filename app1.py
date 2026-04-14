@@ -277,8 +277,8 @@ if st.session_state.rol == "Admin":
 if st.session_state["rol"] == "Roperia":
     st.header("🧺 Gestión de Ropería")
     
-    # Creamos las dos pestañas
-    tab_carga, tab_reporte = st.tabs(["📥 Cargar Movimientos", "📊 Reporte de Consumo"])
+    # Creamos las tres pestañas
+    tab_carga, tab_reporte, tab_crudo = st.tabs(["📥 Cargar Movimientos", "📊 Reporte de Consumo", "📊 Reporte crudo"])
 
     with tab_carga:
         st.subheader("Registro de Entregas y Devoluciones")
@@ -391,7 +391,9 @@ if st.session_state["rol"] == "Roperia":
                 
         except Exception as e:
             st.error(f"Error técnico al generar el reporte: {e}")
-
+    with tab_crudo:
+        st.header("📊 detalle de movimientos")
+        st.dataframe(df_mov, use_container_width=True)
 # ==========================================
 # ROL: PISO
 # ==========================================
