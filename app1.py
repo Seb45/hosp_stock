@@ -44,10 +44,16 @@ df_mov = cargar_movimientos()
 # --- 3. LÓGICA DE VALIDACIÓN POR QR ---
 params = st.query_params
 if "confirmar_id" in params:
-    id_a_confirmar = params["confirmar_id"]
+    # 1. Limpieza extrema del ID (evita que Streamlit lo lea como lista o con espacios en el celular)
+    id_bruto = params["confirmar_id"]
+    id_a_confirmar = id_bruto[0] if isinstance(id_bruto, list) else id_bruto
+    id_a_confirmar = str(id_a_confirmar).strip()
+    
     st.title("📱 Validación de Recepción")
     
-    movimientos_pendientes = df_mov[df_mov['id_mov'].astype(str) == str(id_a_confirmar)]
+    # 2. CONSULTA DIRECTA A SUPABASE (A prueba de balas)
+    respuesta = supabase.table("movimientos").select("*").eq("id_mov", id_a_confirmar).execute()
+    movimientos_pendientes = pd.DataFrame(respuesta.data)
     
     if not movimientos_pendientes.empty:
         if movimientos_pendientes.iloc[0]["estado"] == "Confirmado":
@@ -67,20 +73,22 @@ if "confirmar_id" in params:
                 usuario_data = df_usu[df_usu["nombre"] == responsable]
                 
                 if usuario_data.empty:
-                    st.error("Error: El usuario fue eliminado.")
+                    st.error("Error: El usuario fue eliminado de la base.")
                 else:
                     pin_real = str(usuario_data["pin"].values[0]).strip()
                     
                     if pin_ingresado.strip() == pin_real:
-                        # ACTUALIZACIÓN EN BASE DE DATOS REAL (Concurrencia Segura)
+                        # ACTUALIZACIÓN EN BASE DE DATOS
                         supabase.table("movimientos").update({"estado": "Confirmado"}).eq("id_mov", id_a_confirmar).execute()
                         st.success("✅ Firma digital registrada con éxito.")
                         st.balloons()
                     else:
                         st.error("PIN incorrecto.")
     else:
-        st.error("Transacción no encontrada o código expirado.")
+        # Este mensaje de error te mostrará exactamente qué está leyendo el celular
+        st.error(f"Transacción '{id_a_confirmar}' no encontrada o código expirado.")
     st.stop()
+
 
 # --- 4. SISTEMA DE LOGIN ---
 if 'usuario' not in st.session_state:
