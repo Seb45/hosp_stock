@@ -5,8 +5,11 @@ import qrcode
 import datetime
 from io import BytesIO
 from supabase import create_client, Client
+import requests
 
+        
 st.set_page_config(page_title="Control Hotelería", layout="wide")
+
 
 # --- 1. CONEXIÓN A SUPABASE ---
 @st.cache_resource
@@ -40,6 +43,28 @@ def generar_qr(url):
 df_usu, df_ins, df_sec = cargar_catalogos()
 df_mov = cargar_movimientos()
 
+def enviar_notificacion_telegram(nombre, rol, email="N/A"):
+    token = st.secrets["TELEGRAM_TOKEN"]
+    chat_id = st.secrets["TELEGRAM_CHAT_ID"]
+    
+    # Formateamos el mensaje con Markdown
+    texto = (
+        f"🚀 **Nuevo Acceso al Sistema**\n\n"
+        f"👤 **Usuario:** {nombre}\n"
+        f"🏷️ **Rol:** {rol}\n"
+        f"📧 **Email:** {email}\n\n"
+        f"✅ _Validado en GestionInsumos_"
+    )
+    
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    payload = {"chat_id": chat_id, "text": texto, "parse_mode": "Markdown"}
+    
+    try:
+        requests.post(url, json=payload)
+        return True
+    except Exception as e:
+        print(f"Error Telegram: {e}")
+        return False
 
 # --- 3. GESTIÓN DE SESIÓN (HÍBRIDA) ---
 if 'usuario' not in st.session_state:
