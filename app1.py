@@ -94,7 +94,24 @@ if session and st.session_state.usuario is None:
     resp = supabase.table("usuarios").select("rol").eq("nombre", nombre_google).execute()
     rol = resp.data[0]["rol"] if resp.data else "Piso"
     st.session_state.update({'usuario': nombre_google, 'rol': rol})
-
+# --- LÓGICA DE AVISO AUTOMÁTICO ---
+if st.session_state.get("usuario"):
+    # Consultamos si ya le avisamos a Seba sobre este pibe
+    user_check = supabase.table("usuarios").select("notificado", "email", "rol")\
+        .eq("nombre", st.session_state["usuario"]).single().execute()
+    
+    if user_check.data and not user_check.data.get("notificado"):
+        # Mandamos el Telegram
+        exito = enviar_notificacion_telegram(
+            st.session_state["usuario"], 
+            user_check.data["rol"],
+            user_check.data.get("email", "Acceso por PIN")
+        )
+        
+        if exito:
+            # Marcamos como avisado para que no sature el chat
+            supabase.table("usuarios").update({"notificado": True})\
+                .eq("nombre", st.session_state["usuario"]).execute()
 
 # --- 4. LÓGICA DE VALIDACIÓN POR QR ---
 if "confirmar_id" in st.query_params:
