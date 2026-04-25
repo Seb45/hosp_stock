@@ -371,7 +371,7 @@ if st.session_state["rol"] == "Roperia":
         # - responsable = st.selectbox("Responsable (Piso)", df_usu[df_usu["rol"] == "Piso"]["nombre"].tolist())
 
         # --- LECTURA EN VIVO: Usuarios Responsables (Rol Piso) ---
-        fresh_usu = supabase.table("usuarios").select("nombre").eq("rol", "Piso").execute().data
+        fresh_usu = supabase.table("usuarios").select("nombre").eq("rol", "Piso").order("nombre").execute().data
         lista_responsables = [u["nombre"] for u in fresh_usu] if fresh_usu else []
         
         responsable = st.selectbox("Responsable (Piso)", lista_responsables)
