@@ -368,7 +368,13 @@ if st.session_state["rol"] == "Roperia":
                 st.session_state.num_rows += 1
                 st.rerun()
 
-        responsable = st.selectbox("Responsable (Piso)", df_usu[df_usu["rol"] == "Piso"]["nombre"].tolist())
+        # - responsable = st.selectbox("Responsable (Piso)", df_usu[df_usu["rol"] == "Piso"]["nombre"].tolist())
+
+        # --- LECTURA EN VIVO: Usuarios Responsables (Rol Piso) ---
+        fresh_usu = supabase.table("usuarios").select("nombre").eq("rol", "Piso").execute().data
+        lista_responsables = [u["nombre"] for u in fresh_usu] if fresh_usu else []
+        
+        responsable = st.selectbox("Responsable (Piso)", lista_responsables)
 
         if st.button("🟩 Generar QR y Guardar", type="primary", use_container_width=True):
             nuevo_id = str(uuid.uuid4())[:8]
