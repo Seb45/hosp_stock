@@ -374,7 +374,7 @@ if st.session_state["rol"] == "Roperia":
         fresh_usu = supabase.table("usuarios").select("nombre").eq("rol", "Piso").order("nombre").execute().data
         lista_responsables = [u["nombre"] for u in fresh_usu] if fresh_usu else []
         
-        responsable = st.selectbox("Responsable (Piso)", lista_responsables)
+        responsable = st.selectbox("Nombre", lista_responsables)
 
         if st.button("🟩 Generar QR y Guardar", type="primary", use_container_width=True):
             nuevo_id = str(uuid.uuid4())[:8]
