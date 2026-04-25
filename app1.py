@@ -329,11 +329,22 @@ if st.session_state["rol"] == "Roperia":
         if 'num_rows' not in st.session_state: st.session_state.num_rows = 1
         if 'last_qr' not in st.session_state: st.session_state.last_qr = None
 
+        # -tipo_op = st.radio("Operación", ["Retiro", "Devolución"], horizontal=True)
+        # -col_s, col_t = st.columns(2)
+        # -sector = col_s.selectbox("Sector", df_sec["nombre"].tolist())
+        # -turno = col_t.selectbox("Turno", ["Mañana", "Tarde", "Noche"])
+
+            
         tipo_op = st.radio("Operación", ["Retiro", "Devolución"], horizontal=True)
         col_s, col_t = st.columns(2)
-        sector = col_s.selectbox("Sector", df_sec["nombre"].tolist())
-        turno = col_t.selectbox("Turno", ["Mañana", "Tarde", "Noche"])
         
+        # --- LECTURA EN VIVO: Sectores ---
+        fresh_sec = supabase.table("sectores").select("nombre").execute().data
+        lista_sectores = [s["nombre"] for s in fresh_sec] if fresh_sec else []
+        
+        sector = col_s.selectbox("Sector", lista_sectores)
+        turno = col_t.selectbox("Turno", ["Mañana", "Tarde", "Noche"])
+            
         todos_insumos = df_ins["nombre"].tolist()
         items_data = []
         
