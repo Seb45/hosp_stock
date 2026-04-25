@@ -339,7 +339,7 @@ if st.session_state["rol"] == "Roperia":
         col_s, col_t = st.columns(2)
         
         # --- LECTURA EN VIVO: Sectores ---
-        fresh_sec = supabase.table("sectores").select("nombre").execute().data
+        fresh_sec = supabase.table("sectores").select("nombre").order("nombre").execute().data
         lista_sectores = [s["nombre"] for s in fresh_sec] if fresh_sec else []
         
         sector = col_s.selectbox("Sector", lista_sectores)
