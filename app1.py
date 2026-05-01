@@ -222,12 +222,19 @@ if st.session_state.usuario is None:
 st.sidebar.write(f"👤 **{st.session_state['usuario']}**")
 st.sidebar.write(f"🏷️ Rol: **{st.session_state['rol']}**")
 
-if st.sidebar.button("Cerrar Sesión"):
+if st.sidebar.button("🔒 Cerrar Sesión Segura"):
+    # 1. Avisar a Supabase que cierre la sesión (borra tokens)
     supabase.auth.sign_out()
-    st.session_state["usuario"] = None
-    st.session_state["rol"] = None
-    st.rerun()
     
+    # 2. Limpiar variables locales
+    st.session_state.usuario = None
+    st.session_state.rol = None
+    
+    # 3. Limpiar parámetros de URL por si acaso
+    st.query_params.clear()
+    
+    # 4. Reiniciar la app para volver al login limpio
+    st.rerun()
     
 # ==========================================
 # ROL: ADMINISTRADOR
