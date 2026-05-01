@@ -66,34 +66,50 @@ def enviar_notificacion_telegram(nombre, rol, email="N/A"):
         print(f"Error Telegram: {e}")
         return False
 
-# --- 3. GESTIÓN DE SESIÓN (HÍBRIDA) ---
+
+# --- 3. GESTIÓN DE SESIÓN (SEGURIDAD REFORZADA) ---
 if 'usuario' not in st.session_state:
     st.session_state.update({'usuario': None, 'rol': None})
 
 # A. Interceptar regreso de Google OAuth
 if "code" in st.query_params:
     try:
+        # Intercambia el código y establece la sesión
         supabase.auth.exchange_code_for_session({"auth_code": st.query_params["code"]})
-        if "confirmar_id" in st.query_params:
-            cid = st.query_params["confirmar_id"]
-            st.query_params.clear()
-            st.query_params["confirmar_id"] = cid
-        else:
-            st.query_params.clear()
+        # Limpiar URL para evitar re-ejecuciones
+        st.query_params.clear()
         st.rerun()
     except Exception:
         st.error("Error al validar con Google.")
 
-# B. Sincronizar sesión de Google con Streamlit
-session = supabase.auth.get_session()
-if session and st.session_state.usuario is None:
-    user_metadata = session.user.user_metadata
-    nombre_google = user_metadata.get("full_name", session.user.email)
+# B. Sincronizar y Validar Sesión Activa
+try:
+    # Obtenemos la sesión actual del cliente de Supabase
+    session = supabase.auth.get_session()
     
-    # Buscar su rol en la tabla
-    resp = supabase.table("usuarios").select("rol").eq("nombre", nombre_google).execute()
-    rol = resp.data[0]["rol"] if resp.data else "Piso"
-    st.session_state.update({'usuario': nombre_google, 'rol': rol})
+    if session:
+        # Si hay sesión en Supabase pero no en Streamlit, la cargamos
+        if st.session_state.usuario is None:
+            user_metadata = session.user.user_metadata
+            nombre_google = user_metadata.get("full_name", session.user.email)
+            
+            # Buscar rol (Cacheado para performance)
+            resp = supabase.table("usuarios").select("rol").eq("nombre", nombre_google).execute()
+            rol = resp.data[0]["rol"] if resp.data else "Piso"
+            st.session_state.update({'usuario': nombre_google, 'rol': rol})
+    else:
+        # Si NO hay sesión en Supabase (ej. alguien cerró sesión), 
+        # nos aseguramos de limpiar el estado de Streamlit
+        if st.session_state.usuario is not None:
+            st.session_state.update({'usuario': None, 'rol': None})
+            st.rerun()
+except Exception:
+    # En caso de error de red o sesión expirada, resetear todo
+    st.session_state.update({'usuario': None, 'rol': None})
+        
+
+
+
 # --- LÓGICA DE AVISO AUTOMÁTICO ---
 if st.session_state.get("usuario"):
     # Consultamos si ya le avisamos a Seba sobre este pibe
