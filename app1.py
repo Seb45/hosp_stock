@@ -7,9 +7,8 @@ from io import BytesIO
 from supabase import create_client, Client
 import requests
 
-        
-st.set_page_config(page_title="Control Hotelería", layout="wide")
-
+# --- CONFIGURACIÓN DE PÁGINA ---
+st.set_page_config(page_title="Control Hotelería", layout="wide", initial_sidebar_state="expanded")
 
 # --- 1. CONEXIÓN A SUPABASE ---
 @st.cache_resource
@@ -20,13 +19,17 @@ def init_connection():
 
 supabase: Client = init_connection()
 
-# --- 2. CARGA DE DATOS (CATÁLOGOS) ---
-@st.cache_data(ttl=600)
+# --- 2. FUNCIONES DE CARGA DE DATOS ---
+@st.cache_data(ttl=300) # Reducido a 5 min para mayor frescura
 def cargar_catalogos():
-    usu = pd.DataFrame(supabase.table("usuarios").select("*").execute().data)
-    ins = pd.DataFrame(supabase.table("insumos").select("*").execute().data)
-    sec = pd.DataFrame(supabase.table("sectores").select("*").execute().data)
-    return usu, ins, sec
+    try:
+        usu = pd.DataFrame(supabase.table("usuarios").select("*").execute().data)
+        ins = pd.DataFrame(supabase.table("insumos").select("*").execute().data)
+        sec = pd.DataFrame(supabase.table("sectores").select("*").execute().data)
+        return usu, ins, sec
+    except Exception as e:
+        st.error(f"Error cargando catálogos: {e}")
+        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
 def cargar_movimientos():
     data = supabase.table("movimientos").select("*").order("fecha_hora", desc=True).execute().data
@@ -40,14 +43,9 @@ def generar_qr(url):
     qr.save(buffer, format="PNG")
     return buffer.getvalue()
 
-df_usu, df_ins, df_sec = cargar_catalogos()
-df_mov = cargar_movimientos()
-
 def enviar_notificacion_telegram(nombre, rol, email="N/A"):
     token = st.secrets["TELEGRAM_TOKEN"]
     chat_id = st.secrets["TELEGRAM_CHAT_ID"]
-    
-    # Formateamos el mensaje con Markdown
     texto = (
         f"🚀 **Nuevo Acceso al Sistema**\n\n"
         f"👤 **Usuario:** {nombre}\n"
@@ -55,510 +53,205 @@ def enviar_notificacion_telegram(nombre, rol, email="N/A"):
         f"📧 **Email:** {email}\n\n"
         f"✅ _Validado en GestionInsumos_"
     )
-    
     url = f"https://api.telegram.org/bot{token}/sendMessage"
     payload = {"chat_id": chat_id, "text": texto, "parse_mode": "Markdown"}
-    
     try:
-        requests.post(url, json=payload)
+        requests.post(url, json=payload, timeout=5)
         return True
-    except Exception as e:
-        print(f"Error Telegram: {e}")
+    except:
         return False
 
-# --- 3. GESTIÓN DE SESIÓN (HÍBRIDA) ---
-if 'usuario' not in st.session_state:
-    st.session_state.update({'usuario': None, 'rol': None})
+# --- 3. GESTIÓN DE SESIÓN Y AUTENTICACIÓN ---
 
-# A. Interceptar regreso de Google OAuth
+# Inicializar estados si no existen
+if 'usuario' not in st.session_state:
+    st.session_state.usuario = None
+if 'rol' not in st.session_state:
+    st.session_state.rol = None
+
+# A. Lógica de Login/Logout de Supabase Auth
+def logout():
+    supabase.auth.sign_out()
+    st.session_state.usuario = None
+    st.session_state.rol = None
+    st.query_params.clear()
+    st.rerun()
+
+# B. Procesar regreso de Google OAuth
 if "code" in st.query_params:
     try:
-        supabase.auth.exchange_code_for_session({"auth_code": st.query_params["code"]})
+        # Intercambiar código por sesión
+        auth_response = supabase.auth.exchange_code_for_session({"auth_code": st.query_params["code"]})
+        # Limpiar URL para evitar bucles
+        new_params = {}
         if "confirmar_id" in st.query_params:
-            cid = st.query_params["confirmar_id"]
-            st.query_params.clear()
-            st.query_params["confirmar_id"] = cid
-        else:
-            st.query_params.clear()
+            new_params["confirmar_id"] = st.query_params["confirmar_id"]
+        st.query_params.clear()
+        for k, v in new_params.items():
+            st.query_params[k] = v
         st.rerun()
-    except Exception:
-        st.error("Error al validar con Google.")
+    except Exception as e:
+        st.error(f"Error en validación OAuth: {e}")
 
-# B. Sincronizar sesión de Google con Streamlit
-session = supabase.auth.get_session()
-if session and st.session_state.usuario is None:
-    user_metadata = session.user.user_metadata
-    nombre_google = user_metadata.get("full_name", session.user.email)
+# C. Sincronizar estado local con Supabase
+curr_session = None
+try:
+    curr_session = supabase.auth.get_session()
+except:
+    pass
+
+if curr_session and st.session_state.usuario is None:
+    user_metadata = curr_session.user.user_metadata
+    nombre_google = user_metadata.get("full_name", curr_session.user.email)
+    email_google = curr_session.user.email
     
-    # Buscar su rol en la tabla
+    # Buscar rol en DB
     resp = supabase.table("usuarios").select("rol").eq("nombre", nombre_google).execute()
     rol = resp.data[0]["rol"] if resp.data else "Piso"
+    
     st.session_state.update({'usuario': nombre_google, 'rol': rol})
-# --- LÓGICA DE AVISO AUTOMÁTICO ---
-if st.session_state.get("usuario"):
-    # Consultamos si ya le avisamos a Seba sobre este pibe
-    user_check = supabase.table("usuarios").select("notificado", "email", "rol")\
-        .eq("nombre", st.session_state["usuario"]).single().execute()
     
+    # Notificación Telegram (solo una vez)
+    user_check = supabase.table("usuarios").select("notificado").eq("nombre", nombre_google).single().execute()
     if user_check.data and not user_check.data.get("notificado"):
-        # Mandamos el Telegram
-        exito = enviar_notificacion_telegram(
-            st.session_state["usuario"], 
-            user_check.data["rol"],
-            user_check.data.get("email", "Acceso por PIN")
-        )
-        
-        if exito:
-            # Marcamos como avisado para que no sature el chat
-            supabase.table("usuarios").update({"notificado": True})\
-                .eq("nombre", st.session_state["usuario"]).execute()
+        if enviar_notificacion_telegram(nombre_google, rol, email_google):
+            supabase.table("usuarios").update({"notificado": True, "email": email_google}).eq("nombre", nombre_google).execute()
 
-# --- 4. LÓGICA DE VALIDACIÓN POR QR ---
+# --- 4. INTERFAZ DE ACCESO (SI NO HAY SESIÓN) ---
+df_usu, df_ins, df_sec = cargar_catalogos()
+
+if st.session_state.usuario is None:
+    st.title("🔐 Control Stock Insumos")
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.subheader("Acceso Google")
+        # Asegurarse que redirect_to sea exacto al configurado en Supabase
+        red_url = "https://gestioninsumos.streamlit.app"
+        if "confirmar_id" in st.query_params:
+            red_url += f"?confirmar_id={st.query_params['confirmar_id']}"
+        
+        res = supabase.auth.sign_in_with_oauth({
+            "provider": "google", 
+            "options": {"redirect_to": red_url}
+        })
+        st.link_button("🌐 Iniciar Sesión con Google", res.url, type="primary")
+    
+    with col2:
+        st.subheader("Acceso PIN")
+        with st.form("login_pin"):
+            usuarios_pin = df_usu[df_usu["pin"] != "SSO"]["nombre"].tolist()
+            u_select = st.selectbox("Usuario", usuarios_pin if usuarios_pin else ["No hay usuarios"])
+            p_input = st.text_input("PIN", type="password")
+            if st.form_submit_button("Ingresar"):
+                match = df_usu[(df_usu["nombre"] == u_select) & (df_usu["pin"].astype(str) == p_input.strip())]
+                if not match.empty:
+                    st.session_state.update({'usuario': u_select, 'rol': match["rol"].values[0]})
+                    st.rerun()
+                else:
+                    st.error("PIN incorrecto")
+    st.stop()
+
+# --- 5. LÓGICA DE VALIDACIÓN POR QR (DESPUÉS DEL LOGIN) ---
+df_mov = cargar_movimientos()
+
 if "confirmar_id" in st.query_params:
-    id_bruto = str(st.query_params["confirmar_id"])
-    id_a_confirmar = "".join(c for c in id_bruto if c.isalnum())
-    
+    cid = "".join(c for c in str(st.query_params["confirmar_id"]) if c.isalnum())
     st.title("📱 Validación de Recepción")
-    df_mov['id_limpio'] = df_mov['id_mov'].astype(str).apply(lambda x: "".join(c for c in x if c.isalnum()))
-    movimientos_pendientes = df_mov[df_mov['id_limpio'] == id_a_confirmar]
     
-    if not movimientos_pendientes.empty:
-        if movimientos_pendientes.iloc[0]["estado"] == "Confirmado":
+    df_mov['id_limpio'] = df_mov['id_mov'].astype(str).apply(lambda x: "".join(c for c in x if c.isalnum()))
+    mov_pend = df_mov[df_mov['id_limpio'] == cid]
+    
+    if not mov_pend.empty:
+        if mov_pend.iloc[0]["estado"] == "Confirmado":
             st.success("✅ Esta transacción ya fue confirmada.")
         else:
-            st.info(f"**Sector:** {movimientos_pendientes.iloc[0]['sector']}")
-            st.write("**Detalle de insumos:**")
+            st.info(f"**Pedido de:** {mov_pend.iloc[0]['responsable']}")
+            st.dataframe(mov_pend[["insumo", "cantidad"]], hide_index=True)
             
-            columnas_tecnicas = ["id", "id_mov", "id_limpio", "estado", "usuario_carga", "responsable", "sector", "turno", "fecha_hora"]
-            df_mostrar = movimientos_pendientes.drop(columns=columnas_tecnicas, errors="ignore")
-            st.dataframe(df_mostrar, hide_index=True)
-            
-            responsable = movimientos_pendientes.iloc[0]['responsable']
-            usuario_data = df_usu[df_usu["nombre"] == responsable]
-            
-            if usuario_data.empty:
-                st.error("Error: El usuario responsable fue eliminado de la base.")
+            # Verificar si el usuario logueado es el responsable
+            responsable = mov_pend.iloc[0]['responsable']
+            if st.session_state.usuario == responsable:
+                if st.button("Confirmar Recepción Ahora", type="primary"):
+                    supabase.table("movimientos").update({"estado": "Confirmado"}).eq("id_mov", mov_pend.iloc[0]["id_mov"]).execute()
+                    st.success("Confirmado correctamente.")
+                    st.balloons()
             else:
-                pin_real = str(usuario_data["pin"].values[0]).strip()
-                id_original = str(movimientos_pendientes.iloc[0]["id_mov"])
-                
-                # BIFURCACIÓN DE FIRMA: SSO vs PIN
-                if pin_real == 'SSO':
-                    if st.session_state.usuario == responsable:
-                        if st.button("Firma Digital y Confirmar", type="primary"):
-                            supabase.table("movimientos").update({"estado": "Confirmado"}).eq("id_mov", id_original).execute()
-                            st.success("✅ Recepción validada con éxito.")
-                            st.balloons()
-                    else:
-                        st.warning(f"⚠️ Esta transacción pertenece a **{responsable}**.")
-                        st.write("Debes iniciar sesión con Google para firmar.")
-                        res = supabase.auth.sign_in_with_oauth({"provider": "google", "options": {"redirect_to": f"https://gestioninsumos.streamlit.app/?confirmar_id={id_a_confirmar}"}})
-                        st.link_button("🌐 Iniciar sesión para Firmar", res.url)
-                else:
-                    st.write(f"👤 **Firma manual requerida para: {responsable}**")
-                    pin_ingresado = st.text_input("Ingrese PIN:", type="password")
-                    if st.button("Firmar y Confirmar", type="primary"):
-                        if pin_ingresado.strip() == pin_real:
-                            supabase.table("movimientos").update({"estado": "Confirmado"}).eq("id_mov", id_original).execute()
-                            st.success("✅ Firma registrada con éxito.")
-                            st.balloons()
-                        else:
-                            st.error("PIN incorrecto.")
+                st.warning(f"Atención: Solo **{responsable}** puede confirmar esto.")
     else:
-        st.error(f"Transacción '{id_a_confirmar}' no encontrada.")
+        st.error("Pedido no encontrado.")
     
-    if st.button("Ir al Inicio"):
+    if st.button("Ir al Panel Principal"):
         st.query_params.clear()
         st.rerun()
     st.stop()
 
+# --- 6. PANEL PRINCIPAL ---
+st.sidebar.markdown(f"### Bienvenido\n👤 **{st.session_state.usuario}**\n🏷️ Rol: `{st.session_state.rol}`")
+if st.sidebar.button("🔴 Cerrar Sesión"):
+    logout()
 
-# --- 5. PANTALLA DE ACCESO HÍBRIDO ---
-if st.session_state.usuario is None:
-    st.title("🔐 Control stock insumos")
-    
-    col1, col2 = st.columns([1, 1])
-    
-    with col1:
-        st.subheader("Opción 1: Cuenta Google")
-        st.write("Acceso rápido con tu cuenta de Google.")
-        res = supabase.auth.sign_in_with_oauth({"provider": "google", "options": {"redirect_to": "https://gestioninsumos.streamlit.app"}})
-        st.link_button("🌐 Continuar con Google", res.url, type="primary")
-    
-    with col2:
-        st.subheader("Opción 2: Acceso con PIN")
-        with st.form("login_pin"):
-            # Filtramos para que solo aparezcan los usuarios que NO son de Google
-            usuarios_con_pin = df_usu[df_usu["pin"] != "SSO"]["nombre"].tolist()
-            user = st.selectbox("Usuario", usuarios_con_pin)
-            pin = st.text_input("PIN Numérico", type="password")
-            if st.form_submit_button("Ingresar"):
-                data = df_usu[(df_usu["nombre"] == user) & (df_usu["pin"].astype(str) == pin.strip())]
-                if not data.empty:
-                    st.session_state.update({'usuario': user, 'rol': data["rol"].values[0]})
-                    st.rerun()
-                else:
-                    st.error("Credenciales incorrectas")
-    st.stop()
-
-
-# --- 7. APLICACIÓN PRINCIPAL (ROLES) ---
-st.sidebar.write(f"👤 **{st.session_state['usuario']}**")
-st.sidebar.write(f"🏷️ Rol: **{st.session_state['rol']}**")
-
-if st.sidebar.button("Cerrar Sesión"):
-    supabase.auth.sign_out()
-    st.session_state["usuario"] = None
-    st.session_state["rol"] = None
-    st.rerun()
-    
-    
-# ==========================================
-# ROL: ADMINISTRADOR
-# ==========================================
+# --- VISTA: ADMIN ---
 if st.session_state.rol == "Admin":
-    st.header("⚙️ Panel de Control - ABM")
-    tab_usu, tab_ins, tab_sec = st.tabs(["👤 Usuarios", "📦 Insumos", "🏥 Sectores"])
-
-    with tab_usu:
-        # Agregamos la columna 'email' para que puedas auditar los correos capturados
-        columnas_visibles = ["nombre", "rol", "pin"]
-        if "email" in df_usu.columns:
-            columnas_visibles.append("email")
-            
-        st.dataframe(df_usu[columnas_visibles], hide_index=True, use_container_width=True)
-        
-        # Dividimos en 3 columnas para el ABM completo
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            with st.form("form_add_usu", clear_on_submit=True):
-                st.subheader("➕ Alta Manual")
-                n_nom = st.text_input("Nombre y Apellido")
-                n_rol = st.selectbox("Rol", ["Piso", "Roperia", "Admin"])
-                n_pin = st.text_input("Asignar PIN numérico")
-                if st.form_submit_button("Guardar", type="primary"):
-                    if n_nom and n_pin:
-                        supabase.table("usuarios").insert({"nombre": n_nom, "rol": n_rol, "pin": n_pin}).execute()
-                        cargar_catalogos.clear()
-                        st.success("Usuario creado.")
-                        st.rerun()
-                        
-        with col2:
-            with st.form("form_update_rol"):
-                st.subheader("🔄 Modificar Rol")
-                u_mod = st.selectbox("Usuario", df_usu["nombre"].tolist())
-                n_rol_mod = st.selectbox("Nuevo Rol", ["Piso", "Roperia", "Admin"])
-                if st.form_submit_button("Actualizar"):
-                    supabase.table("usuarios").update({"rol": n_rol_mod}).eq("nombre", u_mod).execute()
-                    cargar_catalogos.clear()
-                    st.success("Actualizado.")
-                    st.rerun()
-                    
-        with col3:
-            with st.form("form_del_usu"):
-                st.subheader("🗑️ Eliminar")
-                u_del = st.selectbox("Usuario a eliminar", df_usu["nombre"].tolist())
-                if st.form_submit_button("Eliminar Permanente"):
-                    # Regla de Seguridad: Evitar auto-eliminación
-                    if u_del == st.session_state["usuario"]:
-                        st.error("No puedes eliminar tu propia cuenta activa.")
-                    else:
-                        # 1. (Opcional pero recomendado) Borrar primero de Supabase Auth si es usuario Google
-                        # Nota: Esto borra de la tabla pública. Para borrar el acceso real de Google, 
-                        # se hace desde la consola de Supabase > Authentication por seguridad extrema.
-                        supabase.table("usuarios").delete().eq("nombre", u_del).execute()
-                        cargar_catalogos.clear()
-                        st.rerun()
-    with tab_ins:
-        st.dataframe(df_ins[["id", "nombre"]], hide_index=True, use_container_width=True)
-        col1, col2 = st.columns(2)
-        with col1:
-            with st.form("form_add_ins", clear_on_submit=True):
-                st.subheader("➕ Agregar Insumo")
-                i_nom = st.text_input("Nombre del Insumo")
-                if st.form_submit_button("Guardar", type="primary"):
-                    if i_nom:
-                        supabase.table("insumos").insert({"nombre": i_nom}).execute()
-                        cargar_catalogos.clear()
-                        st.rerun()
-        with col2:
-            with st.form("form_del_ins"):
-                st.subheader("🗑️ Eliminar Insumo")
-                i_del = st.selectbox("Seleccione", df_ins["nombre"].tolist())
-                if st.form_submit_button("Eliminar"):
-                    supabase.table("insumos").delete().eq("nombre", i_del).execute()
+    st.header("⚙️ Panel de Administración")
+    t1, t2, t3 = st.tabs(["Usuarios", "Insumos", "Sectores"])
+    
+    with t1:
+        st.dataframe(df_usu, use_container_width=True, hide_index=True)
+        with st.expander("Añadir Usuario"):
+            with st.form("add_u"):
+                n = st.text_input("Nombre")
+                r = st.selectbox("Rol", ["Piso", "Roperia", "Admin"])
+                p = st.text_input("PIN (o poner 'SSO' para Google)")
+                if st.form_submit_button("Guardar"):
+                    supabase.table("usuarios").insert({"nombre": n, "rol": r, "pin": p}).execute()
                     cargar_catalogos.clear()
                     st.rerun()
 
-    with tab_sec:
-        st.dataframe(df_sec[["id", "nombre"]], hide_index=True, use_container_width=True)
-        col1, col2 = st.columns(2)
-        with col1:
-            with st.form("form_add_sec", clear_on_submit=True):
-                st.subheader("➕ Agregar Sector")
-                s_nom = st.text_input("Nombre del Sector")
-                if st.form_submit_button("Guardar", type="primary"):
-                    if s_nom:
-                        supabase.table("sectores").insert({"nombre": s_nom}).execute()
-                        cargar_catalogos.clear()
-                        st.rerun()
-        with col2:
-            with st.form("form_del_sec"):
-                st.subheader("🗑️ Eliminar Sector")
-                s_del = st.selectbox("Seleccione", df_sec["nombre"].tolist())
-                if st.form_submit_button("Eliminar"):
-                    supabase.table("sectores").delete().eq("nombre", s_del).execute()
-                    cargar_catalogos.clear()
-                    st.rerun()
-
-
-# ==========================================
-# ROL: ROPERIA
-# ==========================================
-if st.session_state["rol"] == "Roperia":
+# --- VISTA: ROPERIA ---
+elif st.session_state.rol == "Roperia":
     st.header("🧺 Gestión de Ropería")
+    t_c, t_r = st.tabs(["📥 Cargar Movimiento", "📊 Reporte"])
     
-    # Creamos las tres pestañas
-    tab_carga, tab_reporte, tab_crudo = st.tabs(["📥 Cargar Movimientos", "📊 Reporte de Consumo", "📊 Reporte crudo"])
-
-    with tab_carga:
-        st.subheader("Registro de Entregas y Devoluciones")
-        url_app_nube = "https://gestioninsumos.streamlit.app"
-
-        if 'num_rows' not in st.session_state: st.session_state.num_rows = 1
-        if 'last_qr' not in st.session_state: st.session_state.last_qr = None
-
-        # -tipo_op = st.radio("Operación", ["Retiro", "Devolución"], horizontal=True)
-        # -col_s, col_t = st.columns(2)
-        # -sector = col_s.selectbox("Sector", df_sec["nombre"].tolist())
-        # -turno = col_t.selectbox("Turno", ["Mañana", "Tarde", "Noche"])
-
-            
-        tipo_op = st.radio("Operación", ["Retiro", "Devolución"], horizontal=True)
-        col_s, col_t = st.columns(2)
+    with t_c:
+        tipo = st.radio("Tipo", ["Retiro", "Devolución"], horizontal=True)
+        col_a, col_b = st.columns(2)
+        sec_sel = col_a.selectbox("Sector", df_sec["nombre"].tolist())
+        resp_sel = col_b.selectbox("Responsable (Piso)", df_usu[df_usu["rol"]=="Piso"]["nombre"].tolist())
         
-        # --- LECTURA EN VIVO: Sectores ---
-        fresh_sec = supabase.table("sectores").select("nombre").order("nombre").execute().data
-        lista_sectores = [s["nombre"] for s in fresh_sec] if fresh_sec else []
-        
-        sector = col_s.selectbox("Sector", lista_sectores)
-        turno = col_t.selectbox("Turno", ["Mañana", "Tarde", "Noche"])
-            
-        todos_insumos = df_ins["nombre"].tolist()
-        items_data = []
-        
-        for i in range(st.session_state.num_rows):
+        # Insumos dinámicos
+        if 'rows' not in st.session_state: st.session_state.rows = 1
+        items = []
+        for i in range(st.session_state.rows):
             c1, c2 = st.columns([3, 1])
-            key_insumo = f"i_{i}"
-            key_cant = f"c_{i}"
-            
-            otros_seleccionados = [st.session_state[f"i_{j}"] for j in range(st.session_state.num_rows) if j != i and f"i_{j}" in st.session_state]
-            opciones_disponibles = [ins for ins in todos_insumos if ins not in otros_seleccionados]
-            
-            if opciones_disponibles:
-                ins = c1.selectbox(f"Insumo {i+1}", opciones_disponibles, key=key_insumo)
-                cant = c2.number_input(f"Cant {i+1}", min_value=1, key=key_cant)
-                items_data.append({"insumo": ins, "cantidad": cant})
-            else:
-                st.warning(f"Fila {i+1}: No hay más tipos de insumos.")
-            
-        if st.session_state.num_rows < len(todos_insumos):
-            if st.button("➕ Añadir Insumo"):
-                st.session_state.num_rows += 1
-                st.rerun()
-
-        # - responsable = st.selectbox("Responsable (Piso)", df_usu[df_usu["rol"] == "Piso"]["nombre"].tolist())
-
-        # --- LECTURA EN VIVO: Usuarios Responsables (Rol Piso) ---
-        fresh_usu = supabase.table("usuarios").select("nombre").eq("rol", "Piso").order("nombre").execute().data
-        lista_responsables = [u["nombre"] for u in fresh_usu] if fresh_usu else []
+            ins_item = c1.selectbox(f"Insumo {i+1}", df_ins["nombre"].tolist(), key=f"ins_{i}")
+            cant_item = c2.number_input(f"Cant", min_value=1, key=f"can_{i}")
+            items.append({"insumo": ins_item, "cantidad": cant_item})
         
-        responsable = st.selectbox("Nombre", lista_responsables)
-
-        if st.button("🟩 Generar QR y Guardar", type="primary", use_container_width=True):
-            nuevo_id = str(uuid.uuid4())[:8]
-            nuevas_filas = [{"id_mov": nuevo_id, "tipo": tipo_op, "insumo": d["insumo"], "cantidad": d["cantidad"], "responsable": responsable, "sector": sector, "turno": turno, "usuario_carga": st.session_state.usuario} for d in items_data]
-            supabase.table("movimientos").insert(nuevas_filas).execute()
-            st.session_state.last_qr = nuevo_id
-            st.success(f"Registrado. ID: {nuevo_id}")
-
-        if st.session_state.last_qr:
-            url_qr = f"{url_app_nube}/?confirmar_id={st.session_state.last_qr}"
-            st.image(generar_qr(url_qr), width=250)
-            if st.button("Nueva Carga"):
-                st.session_state.num_rows = 1
-                st.session_state.last_qr = None
-                st.rerun()
-
-    with tab_reporte:
-
-        st.subheader("📊 Resumen Consolidado por Sector")
-        st.caption("Este reporte solo contempla movimientos con confirmación del personal de Piso.")
-        
-        # 1. Filtros de fecha
-        col_r1, col_r2 = st.columns(2)
-        hoy = datetime.date.today()
-        f_desde = col_r1.date_input("Fecha Inicio", value=hoy - datetime.timedelta(days=7), key="rep_desde")
-        f_hasta = col_r2.date_input("Fecha Fin", value=hoy, key="rep_hasta")
-
-        try:
-            # FILTRO CRÍTICO: .eq("estado", "Confirmado") garantiza que solo sumamos lo confirmado
-            res = supabase.table("movimientos").select("*")\
-                .gte("fecha_hora", f_desde.strftime("%Y-%m-%d 00:00:00"))\
-                .lte("fecha_hora", f_hasta.strftime("%Y-%m-%d 23:59:59"))\
-                .eq("estado", "Confirmado").execute()
+        if st.button("➕ Insumo"): 
+            st.session_state.rows += 1
+            st.rerun()
             
-            if res.data:
-                df_rep = pd.DataFrame(res.data)
-                
-                # 2. Lógica de cálculo (Vectorizada para mayor velocidad)
-                df_rep['Retiros'] = df_rep.apply(lambda x: x['cantidad'] if x['tipo'] == 'Retiro' else 0, axis=1)
-                df_rep['Devoluciones'] = df_rep.apply(lambda x: x['cantidad'] if x['tipo'] == 'Devolución' else 0, axis=1)
-                
-                # 3. Agrupamiento por Sector e Insumo
-                resumen = df_rep.groupby(['sector', 'insumo']).agg({
-                    'Retiros': 'sum',
-                    'Devoluciones': 'sum'
-                }).reset_index()
-                
-                # 4. Cálculo del Neto Real (Consumo final en el sector)
-                resumen['Neto (Consumo)'] = - resumen['Retiros'] + resumen['Devoluciones']
-                
-                # 5. Visualización con formato
-                st.write(f"📊 Datos confirmados entre {f_desde.strftime('%d/%m/%Y')} y {f_hasta.strftime('%d/%m/%Y')}")
-                
-                # Ordenamos por los consumos más altos primero
-                resumen = resumen.sort_values(by=['sector', 'Neto (Consumo)'], ascending=[True, False])
-                
-                st.dataframe(
-                    resumen,
-                    hide_index=True,
-                    use_container_width=True
-                )
-                
-                # Botón de descarga para gestión administrativa
-                csv = resumen.to_csv(index=False).encode('utf-8')
-                st.download_button(
-                    label="📥 Descargar Reporte de Consumo (CSV)",
-                    data=csv,
-                    file_name=f"reporte_confirmados_{hoy}.csv",
-                    mime="text/csv",
-                )
-            else:
-                st.info("No se encontraron movimientos aprobados (confirmados) en este rango de fechas.")
-                
-        except Exception as e:
-            st.error(f"Error técnico al generar el reporte: {e}")
-    with tab_crudo:
-        st.header("📊 detalle de movimientos")
-        st.dataframe(df_mov, use_container_width=True)
-# ==========================================
-# ROL: PISO
-# ==========================================
-if st.session_state["rol"] == "Piso":
-    st.header(f"🏥 Panel de {st.session_state['usuario']}")
-    st.subheader("📋 Pendientes de Confirmación")
+        if st.button("💾 Registrar y Generar QR", type="primary"):
+            m_id = str(uuid.uuid4())[:8]
+            filas = [{"id_mov": m_id, "tipo": tipo, "insumo": x["insumo"], "cantidad": x["cantidad"], "responsable": resp_sel, "sector": sec_sel, "usuario_carga": st.session_state.usuario} for x in items]
+            supabase.table("movimientos").insert(filas).execute()
+            st.image(generar_qr(f"https://gestioninsumos.streamlit.app?confirmar_id={m_id}"), caption=f"ID: {m_id}")
 
-    try:
-        res_p = supabase.table("movimientos").select("*")\
-            .eq("responsable", st.session_state["usuario"])\
-            .eq("estado", "Pendiente")\
-            .order("fecha_hora", desc=True).execute()
-        pendientes_data = res_p.data
-    except Exception as e:
-        st.error(f"Error al consultar pendientes: {e}")
-        pendientes_data = []
-
-    if pendientes_data:
-        # Agrupar por id_mov
-        grupos = {}
-        for item in pendientes_data:
-            id_mov = item["id_mov"]
-            if id_mov not in grupos:
-                grupos[id_mov] = {
-                    "id_mov": id_mov,
-                    "sector": item["sector"],
-                    "fecha_hora": item["fecha_hora"],
-                    "insumos": []
-                }
-            grupos[id_mov]["insumos"].append(f"{item['insumo']} x{item['cantidad']}")
-
-        st.write("Confirme o rechace cada pedido recibido:")
-
-        for id_mov, grupo in grupos.items():
-            with st.container():
-                col_info, col_ok, col_ko = st.columns([3, 0.5, 0.5])
-
-                with col_info:
-                    insumos_str = " · ".join(grupo["insumos"])
-                    st.markdown(f"**📦 Pedido:** `{id_mov}`")
-                    st.markdown(f"{insumos_str}")
-                    st.caption(f"Sector: {grupo['sector']} | Fecha: {grupo['fecha_hora'][:16]}")
-
-                with col_ok:
-                    if st.button("✅", key=f"piso_ok_{id_mov}", help="Confirmar todo el pedido"):
-                        supabase.table("movimientos")\
-                            .update({"estado": "Confirmado"})\
-                            .eq("id_mov", id_mov)\
-                            .execute()
-                        st.toast(f"✅ Pedido {id_mov} Confirmado")
-                        st.rerun()
-
-                with col_ko:
-                    if st.button("❌", key=f"piso_ko_{id_mov}", help="Rechazar todo el pedido"):
-                        supabase.table("movimientos")\
-                            .update({"estado": "Rechazado"})\
-                            .eq("id_mov", id_mov)\
-                            .execute()
-                        st.toast(f"❌ Pedido {id_mov} rechazado")
-                        st.rerun()
-
-            st.markdown("---")
+# --- VISTA: PISO ---
+elif st.session_state.rol == "Piso":
+    st.header(f"🏥 Panel de {st.session_state.usuario}")
+    # Pendientes
+    pends = supabase.table("movimientos").select("*").eq("responsable", st.session_state.usuario).eq("estado", "Pendiente").execute().data
+    if pends:
+        df_p = pd.DataFrame(pends)
+        for id_m in df_p["id_mov"].unique():
+            with st.container(border=True):
+                data_m = df_p[df_p["id_mov"] == id_m]
+                st.write(f"**Pedido {id_m}** - {data_m.iloc[0]['sector']}")
+                st.write(", ".join([f"{r['insumo']} (x{r['cantidad']})" for _, r in data_m.iterrows()]))
+                if st.button("Confirmar", key=f"btn_{id_m}"):
+                    supabase.table("movimientos").update({"estado": "Confirmado"}).eq("id_mov", id_m).execute()
+                    st.rerun()
     else:
-        st.info("No tienes movimientos pendientes en este momento.")
-
-
-# --- PARTE 2: HISTORIAL CON FILTROS ---
-    st.divider()
-    st.subheader("📜 Mi Historial de Movimientos")
-    
-    col_f1, col_f2 = st.columns(2)
-    hoy = datetime.date.today()
-    f_desde = col_f1.date_input("Desde", value=hoy - datetime.timedelta(days=7))
-    f_hasta = col_f2.date_input("Hasta", value=hoy)
-    
-    try:
-        res_h = supabase.table("movimientos").select("*")\
-            .eq("responsable", st.session_state["usuario"])\
-            .gte("fecha_hora", f_desde.strftime("%Y-%m-%d 00:00:00"))\
-            .lte("fecha_hora", f_hasta.strftime("%Y-%m-%d 23:59:59"))\
-            .order("fecha_hora", desc=True).execute()
-        
-        historial = res_h.data
-    except Exception as e:
-        st.error(f"Error al cargar el historial: {e}")
-        historial = []
-
-    if historial:
-        df_h = pd.DataFrame(historial)
-        
-        # 1. Limpieza de datos y nombres
-        df_h['Fecha/Hora'] = pd.to_datetime(df_h['fecha_hora']).dt.strftime('%d/%m/%y %H:%M')
-        df_mostrar = df_h[["Fecha/Hora", "tipo", "insumo", "cantidad", "estado"]].copy()
-        
-        # 2. Función de color (la misma de antes)
-        def color_estado(val):
-            if val == 'Aprobado': return 'background-color: #d4edda; color: #155724'
-            if val == 'Rechazado': return 'background-color: #f8d7da; color: #721c24'
-            return 'background-color: #fff3cd; color: #856404'
-
-        # 3. MÉTODO COMPATIBLE: Usamos .apply en lugar de .applymap o .map
-        # Esto funciona en Pandas viejo, nuevo y futuro.
-        st.dataframe(
-            df_mostrar.style.apply(lambda x: [color_estado(v) for v in x], subset=['estado']),
-            hide_index=True,
-            use_container_width=True
-        )
-    else:
-        st.info("No hay registros en el rango de fechas seleccionado.")
+        st.info("No tienes pedidos pendientes.")
