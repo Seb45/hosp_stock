@@ -82,30 +82,6 @@ if "code" in st.query_params:
     except Exception:
         st.error("Error al validar con Google.")
 
-# B. Sincronizar y Validar Sesión Activa
-try:
-    # Obtenemos la sesión actual del cliente de Supabase
-    session = supabase.auth.get_session()
-    
-    if session:
-        # Si hay sesión en Supabase pero no en Streamlit, la cargamos
-        if st.session_state.usuario is None:
-            user_metadata = session.user.user_metadata
-            nombre_google = user_metadata.get("full_name", session.user.email)
-            
-            # Buscar rol (Cacheado para performance)
-            resp = supabase.table("usuarios").select("rol").eq("nombre", nombre_google).execute()
-            rol = resp.data[0]["rol"] if resp.data else "Piso"
-            st.session_state.update({'usuario': nombre_google, 'rol': rol})
-    else:
-        # Si NO hay sesión en Supabase (ej. alguien cerró sesión), 
-        # nos aseguramos de limpiar el estado de Streamlit
-        if st.session_state.usuario is not None:
-            st.session_state.update({'usuario': None, 'rol': None})
-            st.rerun()
-except Exception:
-    # En caso de error de red o sesión expirada, resetear todo
-    st.session_state.update({'usuario': None, 'rol': None})
         
 if session and st.session_state.usuario is None:
     user_metadata = session.user.user_metadata
