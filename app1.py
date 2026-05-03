@@ -66,23 +66,26 @@ def enviar_notificacion_telegram(nombre, rol, email="N/A"):
         print(f"Error Telegram: {e}")
         return False
 
-
-# --- 3. GESTIÓN DE SESIÓN (SEGURIDAD REFORZADA) ---
+# --- 3. GESTIÓN DE SESIÓN (HÍBRIDA) ---
 if 'usuario' not in st.session_state:
     st.session_state.update({'usuario': None, 'rol': None})
 
 # A. Interceptar regreso de Google OAuth
 if "code" in st.query_params:
     try:
-        # Intercambia el código y establece la sesión
         supabase.auth.exchange_code_for_session({"auth_code": st.query_params["code"]})
-        # Limpiar URL para evitar re-ejecuciones
-        st.query_params.clear()
+        if "confirmar_id" in st.query_params:
+            cid = st.query_params["confirmar_id"]
+            st.query_params.clear()
+            st.query_params["confirmar_id"] = cid
+        else:
+            st.query_params.clear()
         st.rerun()
     except Exception:
         st.error("Error al validar con Google.")
 
-        
+# B. Sincronizar sesión de Google con Streamlit
+session = supabase.auth.get_session()
 if session and st.session_state.usuario is None:
     user_metadata = session.user.user_metadata
     nombre_google = user_metadata.get("full_name", session.user.email)
@@ -91,9 +94,6 @@ if session and st.session_state.usuario is None:
     resp = supabase.table("usuarios").select("rol").eq("nombre", nombre_google).execute()
     rol = resp.data[0]["rol"] if resp.data else "Piso"
     st.session_state.update({'usuario': nombre_google, 'rol': rol})
-
-
-
 # --- LÓGICA DE AVISO AUTOMÁTICO ---
 if st.session_state.get("usuario"):
     # Consultamos si ya le avisamos a Seba sobre este pibe
@@ -206,19 +206,12 @@ if st.session_state.usuario is None:
 st.sidebar.write(f"👤 **{st.session_state['usuario']}**")
 st.sidebar.write(f"🏷️ Rol: **{st.session_state['rol']}**")
 
-if st.sidebar.button("🔒 Cerrar Sesión Segura"):
-    # 1. Avisar a Supabase que cierre la sesión (borra tokens)
+if st.sidebar.button("Cerrar Sesión"):
     supabase.auth.sign_out()
-    
-    # 2. Limpiar variables locales
-    st.session_state.usuario = None
-    st.session_state.rol = None
-    
-    # 3. Limpiar parámetros de URL por si acaso
-    st.query_params.clear()
-    
-    # 4. Reiniciar la app para volver al login limpio
+    st.session_state["usuario"] = None
+    st.session_state["rol"] = None
     st.rerun()
+    
     
 # ==========================================
 # ROL: ADMINISTRADOR
