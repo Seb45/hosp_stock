@@ -107,6 +107,14 @@ except Exception:
     # En caso de error de red o sesión expirada, resetear todo
     st.session_state.update({'usuario': None, 'rol': None})
         
+if session and st.session_state.usuario is None:
+    user_metadata = session.user.user_metadata
+    nombre_google = user_metadata.get("full_name", session.user.email)
+    
+    # Buscar su rol en la tabla
+    resp = supabase.table("usuarios").select("rol").eq("nombre", nombre_google).execute()
+    rol = resp.data[0]["rol"] if resp.data else "Piso"
+    st.session_state.update({'usuario': nombre_google, 'rol': rol})
 
 
 
