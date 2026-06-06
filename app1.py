@@ -544,7 +544,8 @@ if st.session_state["rol"] == "Piso":
         df_h = pd.DataFrame(historial)
         
         # 1. Limpieza de datos y nombres
-        df_h['Fecha/Hora'] = pd.to_datetime(df_h['fecha_hora']).dt.strftime('%d/%m/%y %H:%M')
+        
+        df_h['Fecha/Hora'] = (pd.to_datetime(df_h['fecha_hora']) - pd.Timedelta(hours=3)).dt.strftime('%d/%m/%y %H:%M')
         df_mostrar = df_h[["Fecha/Hora", "tipo", "insumo", "cantidad", "estado"]].copy()
         
         # 2. Función de color (la misma de antes)
