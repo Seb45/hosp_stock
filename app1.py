@@ -452,7 +452,13 @@ if st.session_state["rol"] == "Roperia":
             st.error(f"Error técnico al generar el reporte: {e}")
     with tab_crudo:
         st.header("📊 detalle de movimientos")
-        st.dataframe(df_mov, use_container_width=True)
+        #st.dataframe(df_mov, use_container_width=True)
+        df_crudo = df_mov.copy()
+            if "fecha_hora" in df_crudo.columns:
+                df_crudo["fecha_hora"] = (pd.to_datetime(df_crudo["fecha_hora"]) - pd.Timedelta(hours=3)).dt.strftime('%d/%m/%y %H:%M')
+            st.dataframe(df_crudo, use_container_width=True)
+
+
 # ==========================================
 # ROL: PISO
 # ==========================================
