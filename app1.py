@@ -494,7 +494,9 @@ if st.session_state["rol"] == "Piso":
                     insumos_str = " · ".join(grupo["insumos"])
                     st.markdown(f"**📦 Pedido:** `{id_mov}`")
                     st.markdown(f"{insumos_str}")
-                    st.caption(f"Sector: {grupo['sector']} | Fecha: {grupo['fecha_hora'][:16]}")
+                    #st.caption(f"Sector: {grupo['sector']} | Fecha: {grupo['fecha_hora'][:16]}")
+                    fecha_local = (pd.to_datetime(grupo['fecha_hora']) - pd.Timedelta(hours=3)).strftime('%d/%m/%y %H:%M')
+                    st.caption(f"Sector: {grupo['sector']} | Fecha: {fecha_local}")
 
                 with col_ok:
                     if st.button("✅", key=f"piso_ok_{id_mov}", help="Confirmar todo el pedido"):
