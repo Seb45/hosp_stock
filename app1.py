@@ -335,7 +335,13 @@ if st.session_state["rol"] == "Roperia":
         # -turno = col_t.selectbox("Turno", ["Mañana", "Tarde", "Noche"])
 
             
-        tipo_op = st.radio("Operación", ["Retiro", "Devolución"], horizontal=True)
+        #tipo_op = st.radio("Operación", ["Retiro", "Devolución"], horizontal=True)
+        tipo_op = st.radio(
+            "Operación",
+            ["Retiro", "Devolución"],
+            format_func=lambda x: "Retiro LIMPIO 😊" if x == "Retiro" else "Devolución SUCIO 💩",
+            horizontal=True,
+        )
         col_s, col_t = st.columns(2)
         
         # --- LECTURA EN VIVO: Sectores ---
